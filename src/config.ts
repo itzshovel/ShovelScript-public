@@ -20,7 +20,7 @@ export const config = {
   guildId: required('GUILD_ID'),
   github: {
     owner: optional('GITHUB_OWNER', 'itzshovel'),
-    repo: optional('GITHUB_REPO', 'shovelScript'),
+    repo: optional('GITHUB_REPO', 'ShovelScript-public'),
     assetName: optional('ASSET_NAME', 'shovelscript.user.js'),
   },
 };
