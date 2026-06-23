@@ -1,0 +1,25 @@
+{
+  "name": "shovelscript-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Discord bot that distributes the flowr.fun userscript (shovelScript) and announces new releases.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "node --use-system-ca --env-file=.env --import tsx src/index.ts",
+    "register": "node --use-system-ca --env-file=.env --import tsx src/deploy-commands.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
