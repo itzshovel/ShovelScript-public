@@ -8,7 +8,7 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   const e = new EmbedBuilder()
     .setColor(0x9b59b6)
-    .setTitle('flowr.fun Utility Suite — Help')
+    .setTitle('ShovelScript — Help')
     .setDescription(
       [
         '**/script** — get the userscript + install instructions (always the latest build).',
@@ -19,6 +19,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         'Install via the **📥 button** and Tampermonkey keeps you auto-updated — no need to come back here for new versions.',
       ].join('\n'),
     )
-    .setFooter({ text: 'shovelScript' });
+    .setFooter({ text: 'ShovelScript' });
   await interaction.reply({ embeds: [e], components: [installButtonRow()] });
 }

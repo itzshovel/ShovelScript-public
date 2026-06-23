@@ -1,11 +1,11 @@
 # shovelScript
 
-Distribution home for the **flowr.fun Utility Suite** userscript.
+Distribution home for the **ShovelScript** userscript (for flowr.fun).
 
 This repo does two jobs:
 
 1. **Hosts the userscript** as GitHub Release assets. The permanent install URL is
-   `https://github.com/itzshovel/shovelScript/releases/latest/download/flowr-userscript.user.js`
+   `https://github.com/itzshovel/shovelScript/releases/latest/download/shovelscript.user.js`
    — it always resolves to the newest release, and the userscript's baked-in
    `@updateURL`/`@downloadURL` point here, so Tampermonkey auto-updates every
    installed user with no action on their part.

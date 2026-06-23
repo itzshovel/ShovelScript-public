@@ -21,7 +21,7 @@ export const config = {
   github: {
     owner: optional('GITHUB_OWNER', 'itzshovel'),
     repo: optional('GITHUB_REPO', 'shovelScript'),
-    assetName: optional('ASSET_NAME', 'flowr-userscript.user.js'),
+    assetName: optional('ASSET_NAME', 'shovelscript.user.js'),
   },
 };
 

@@ -2,7 +2,7 @@
   "name": "shovelscript-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "Discord bot that distributes the flowr.fun userscript (shovelScript) and announces new releases.",
+  "description": "Discord bot that distributes the ShovelScript userscript for flowr.fun and announces new releases.",
   "type": "module",
   "engines": {
     "node": ">=20"

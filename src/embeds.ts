@@ -35,7 +35,7 @@ function relTime(iso: string | null): string {
 
 // /script — file + install instructions + latest changelog.
 export function scriptEmbed(latest: Release | null): EmbedBuilder {
-  const e = new EmbedBuilder().setColor(COLOR).setTitle('flowr.fun — Utility Suite').setFooter({ text: 'shovelScript' });
+  const e = new EmbedBuilder().setColor(COLOR).setTitle('ShovelScript').setFooter({ text: 'ShovelScript' });
   if (!latest) {
     return e.setDescription('No release has been published yet. Check back soon.');
   }
@@ -58,7 +58,7 @@ export function scriptEmbed(latest: Release | null): EmbedBuilder {
 
 // /version — just the latest version + its notes.
 export function versionEmbed(latest: Release | null): EmbedBuilder {
-  const e = new EmbedBuilder().setColor(COLOR).setFooter({ text: 'shovelScript' });
+  const e = new EmbedBuilder().setColor(COLOR).setFooter({ text: 'ShovelScript' });
   if (!latest) return e.setTitle('No releases yet').setDescription('No version has been published.');
   e.setTitle(`Latest version: ${latest.tag}`).setURL(latest.htmlUrl).setDescription(truncate(latest.body, 4000));
   if (latest.publishedAt) e.setTimestamp(new Date(latest.publishedAt));
@@ -72,14 +72,14 @@ export function changelogEmbed(rel: Release): EmbedBuilder {
     .setTitle(rel.name)
     .setURL(rel.htmlUrl)
     .setDescription(truncate(rel.body, 4000))
-    .setFooter({ text: 'shovelScript' });
+    .setFooter({ text: 'ShovelScript' });
   if (rel.publishedAt) e.setTimestamp(new Date(rel.publishedAt));
   return e;
 }
 
 // /changelog (no arg) — recent release history.
 export function releaseListEmbed(releases: Release[]): EmbedBuilder {
-  const e = new EmbedBuilder().setColor(COLOR).setTitle('Recent releases').setFooter({ text: 'shovelScript' });
+  const e = new EmbedBuilder().setColor(COLOR).setTitle('Recent releases').setFooter({ text: 'ShovelScript' });
   if (!releases.length) return e.setDescription('No releases yet.');
   const body = releases.map((r) => `**${r.tag}** ${relTime(r.publishedAt)}\n${firstLine(r.body)}`).join('\n\n');
   return e.setDescription(truncate(body, 4000));
@@ -90,7 +90,7 @@ export function releaseListEmbed(releases: Release[]): EmbedBuilder {
 export function pinnedInstallEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(COLOR)
-    .setTitle('Install — flowr.fun Utility Suite')
+    .setTitle('Install — ShovelScript')
     .setDescription(
       [
         "This installs the **latest** version and **auto-updates** forever — install once and you're always current.",
@@ -102,5 +102,5 @@ export function pinnedInstallEmbed(): EmbedBuilder {
         'New versions arrive automatically — no need to reinstall. Use **/version** to see what changed.',
       ].join('\n'),
     )
-    .setFooter({ text: 'shovelScript • always up to date' });
+    .setFooter({ text: 'ShovelScript • always up to date' });
 }
