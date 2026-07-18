@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
 import { getReleaseByTag, listReleases } from '../github.js';
 import { changelogEmbed, releaseListEmbed } from '../embeds.js';
 
@@ -10,7 +10,7 @@ export const data = new SlashCommandBuilder()
   );
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-  await interaction.deferReply();
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const version = interaction.options.getString('version');
 
   if (version) {

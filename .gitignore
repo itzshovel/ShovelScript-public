@@ -2,3 +2,7 @@ node_modules/
 dist/
 .env
 *.log
+
+# /spin minigame SQLite database (state lives on the deploy volume, never in git)
+data/*.db
+data/*.db-*

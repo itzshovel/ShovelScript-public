@@ -5,7 +5,7 @@
   "description": "Discord bot that distributes the ShovelScript userscript for flowr.fun and announces new releases.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "scripts": {
     "build": "tsc",
@@ -19,6 +19,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/pngjs": "^6.0.5",
+    "pngjs": "^7.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

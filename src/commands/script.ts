@@ -1,4 +1,4 @@
-import { AttachmentBuilder, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { AttachmentBuilder, MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
 import { config } from '../config.js';
 import { downloadAsset, getLatestRelease } from '../github.js';
 import { installButtonRow, scriptEmbed } from '../embeds.js';
@@ -8,7 +8,7 @@ export const data = new SlashCommandBuilder()
   .setDescription('Get the flowr.fun userscript + install instructions (always the latest version).');
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-  await interaction.deferReply();
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const latest = await getLatestRelease();
 
   const files: AttachmentBuilder[] = [];

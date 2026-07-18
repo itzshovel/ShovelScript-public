@@ -18,6 +18,12 @@ export const config = {
   token: required('DISCORD_TOKEN'),
   applicationId: required('APPLICATION_ID'),
   guildId: required('GUILD_ID'),
+  // Only members with this role may run /setup (enforced at runtime in commands/setup.ts).
+  // Override per-deploy with SETUP_ROLE_ID; defaults to the production staff role.
+  setupRoleId: optional('SETUP_ROLE_ID', '1518909571748593684'),
+  // SQLite file for the /spin minigame. On Railway, point this at a mounted
+  // volume (e.g. /data/spin.db) so collections survive redeploys.
+  spinDbPath: optional('SPIN_DB_PATH', 'data/spin.db'),
   github: {
     owner: optional('GITHUB_OWNER', 'itzshovel'),
     repo: optional('GITHUB_REPO', 'ShovelScript-public'),

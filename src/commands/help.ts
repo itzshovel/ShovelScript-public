@@ -1,4 +1,4 @@
-import { EmbedBuilder, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { EmbedBuilder, MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
 import { installButtonRow } from '../embeds.js';
 
 export const data = new SlashCommandBuilder()
@@ -20,5 +20,5 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       ].join('\n'),
     )
     .setFooter({ text: 'ShovelScript' });
-  await interaction.reply({ embeds: [e], components: [installButtonRow()] });
+  await interaction.reply({ embeds: [e], components: [installButtonRow()], flags: MessageFlags.Ephemeral });
 }
