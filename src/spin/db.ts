@@ -227,6 +227,31 @@ export function getStackCount(userId: string, petal: string, tier: number): numb
   return row ? Number(row.count) : 0;
 }
 
+/** Snapshot the whole database next to itself (VACUUM INTO) and return the
+ *  backup path. Called right before destructive operations. */
+export function backupDatabase(nowMs: number): string {
+  const stamp = new Date(nowMs).toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const backupPath = dbPath.replace(/\.db$/, '') + `-backup-${stamp}.db`;
+  db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+  return backupPath;
+}
+
+/** Full economy reset: wipes users, collections, effects, and the sacrifice
+ *  queue. Staff config (cooldown, flair, channel lock, odds overrides) is
+ *  kept. Returns how many users were wiped. */
+export function resetEconomy(): number {
+  db.exec('BEGIN');
+  try {
+    const row = db.prepare('SELECT COUNT(*) AS n FROM spin_users').get() as { n: number };
+    db.exec('DELETE FROM spin_users; DELETE FROM spin_collection; DELETE FROM spin_effects; DELETE FROM spin_sacrifices');
+    db.exec('COMMIT');
+    return Number(row.n);
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
 /** Dev/admin boost: enqueues a sacrifice-style luck boost with no petal burned
  *  and no worth deducted. */
 export function enqueueDevBoost(userId: string, mult: number, spins: number, nowMs: number): void {
