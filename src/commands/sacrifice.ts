@@ -106,59 +106,71 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     new ButtonBuilder().setCustomId(`sac:cancel:${sid}`).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
   );
 
-  await interaction.reply({ embeds: [preview], components: [row], flags: MessageFlags.Ephemeral });
+  await interaction.reply({ embeds: [preview], components: [row], allowedMentions: { parse: [] } });
   const message = await interaction.fetchReply();
 
-  let btn;
-  try {
-    btn = await message.awaitMessageComponent({
-      componentType: ComponentType.Button,
-      time: 60_000,
-      filter: (i) => i.user.id === userId,
-    });
-  } catch {
-    await interaction.editReply({ components: [] }).catch(() => {});
-    return;
-  }
-
-  if (btn.customId !== `sac:confirm:${sid}`) {
-    await btn.update({ content: 'Sacrifice cancelled.', embeds: [], components: [] });
-    return;
-  }
-
-  const ok = db.performSacrifice({
-    userId,
-    petal: petal.name,
-    tier,
-    value,
-    mult,
-    spins,
-    nowMs: Date.now(),
+  const collector = message.createMessageComponentCollector({
+    componentType: ComponentType.Button,
+    time: 60_000,
   });
-  if (!ok) {
-    await btn.update({ content: '❌ That stack is gone (already sacrificed?).', embeds: [], components: [] });
-    return;
-  }
 
-  await btn.update({ content: '🩸 Sacrifice accepted.', embeds: [], components: [] });
+  collector.on('collect', (btn) => {
+    void (async () => {
+      if (btn.user.id !== userId) {
+        await btn.reply({
+          content: `Only ${interaction.user.username} can decide this sacrifice.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      collector.stop('answered');
 
-  const nowQueued = db.getSacrificeQueue();
-  const position = nowQueued.findIndex((s) => s.userId === userId && s.petal === petal.name && s.tier === tier);
-  const isActive = position <= 0;
+      if (btn.customId !== `sac:confirm:${sid}`) {
+        await btn.update({ content: 'Sacrifice cancelled.', embeds: [], components: [] });
+        return;
+      }
 
-  const announce = new EmbedBuilder()
-    .setColor(rarityColor(tier))
-    .setTitle(`🩸 ${interaction.user.username} sacrificed a ${rarities[tier].name} ${name}!`)
-    .setDescription(
-      `Worth ${fmtValue(value)} — the server gains **x${fmtMult(mult)} luck for ${spins} spins**.\n` +
-        (isActive ? 'The boost is **live now** — go spin!' : `Queued: it activates after the current boost${nowQueued.length > 2 ? 'es' : ''} run out.`),
-    )
-    .setThumbnail('attachment://petal.png')
-    .setFooter({ text: 'Sacrifice boosts apply to everyone\'s spins' });
+      const ok = db.performSacrifice({
+        userId,
+        petal: petal.name,
+        tier,
+        value,
+        mult,
+        spins,
+        nowMs: Date.now(),
+      });
+      if (!ok) {
+        await btn.update({ content: '❌ That stack is gone (already sacrificed?).', embeds: [], components: [] });
+        return;
+      }
 
-  await interaction.followUp({
-    embeds: [announce],
-    files: [new AttachmentBuilder(petalImage(petal.name), { name: 'petal.png' })],
-    allowedMentions: { parse: [] },
+      const nowQueued = db.getSacrificeQueue();
+      const position = nowQueued.findIndex((s) => s.userId === userId && s.petal === petal.name && s.tier === tier);
+      const isActive = position <= 0;
+
+      const announce = new EmbedBuilder()
+        .setColor(rarityColor(tier))
+        .setTitle(`🩸 ${interaction.user.username} sacrificed a ${rarities[tier].name} ${name}!`)
+        .setDescription(
+          `Worth ${fmtValue(value)} — the server gains **x${fmtMult(mult)} luck for ${spins} spins**.\n` +
+            (isActive ? 'The boost is **live now** — go spin!' : `Queued: it activates after the current boost${nowQueued.length > 2 ? 'es' : ''} run out.`),
+        )
+        .setThumbnail('attachment://petal.png')
+        .setFooter({ text: 'Sacrifice boosts apply to everyone\'s spins' });
+
+      await btn.update({
+        embeds: [announce],
+        files: [new AttachmentBuilder(petalImage(petal.name), { name: 'petal.png' })],
+        components: [],
+      });
+    })().catch((err) => console.error('sacrifice confirm error:', err));
+  });
+
+  collector.on('end', (_collected, reason) => {
+    if (reason !== 'answered') {
+      void interaction
+        .editReply({ content: '🩸 Sacrifice offer expired.', embeds: [], components: [] })
+        .catch(() => {});
+    }
   });
 }
