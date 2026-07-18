@@ -22,6 +22,15 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return;
   }
 
+  const spinChannelId = db.getSpinChannelId();
+  if (spinChannelId && interaction.channelId !== spinChannelId) {
+    await interaction.reply({
+      content: `🎰 Spinning only works in <#${spinChannelId}>.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
   const now = Date.now();
   const userId = interaction.user.id;
   const user = db.getUser(userId);
@@ -46,7 +55,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   const rng = Math.random;
   const effects = db.getEffects(userId);
-  const { luck, consumedIds, parts } = engine.computeLuck(effects, now);
+  const sacrifice = db.getSacrificeQueue()[0];
+  const globalBoosts = sacrifice
+    ? [{ label: `Sacrifice x${sacrifice.mult.toFixed(2)} (${sacrifice.spinsLeft} left)`, mult: sacrifice.mult }]
+    : [];
+  const { luck, consumedIds, parts } = engine.computeLuck(effects, now, globalBoosts);
   const tier = engine.rollTier(luck, db.getWeightOverrides(), rng);
   const petal = engine.pickPetal(tier, rng);
   const serum = engine.serumActive(effects, now);
@@ -62,6 +75,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     stunnedUntilMs: outcome.stunnedUntilMs,
     consumedEffectIds: consumedIds,
     newEffects: outcome.newEffects,
+    consumedSacrificeId: sacrifice?.id ?? null,
   });
 
   const rarity = rarities[tier];

@@ -1,4 +1,5 @@
 // /collection — view a player's petal collection, grouped by rarity.
+// Static single-page view; /inventory is the button-paginated browser.
 
 import {
   EmbedBuilder,
@@ -6,9 +7,8 @@ import {
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
 } from 'discord.js';
-import { displayName, findPetal, rarities, rarityColor } from '../spin/data.js';
 import * as db from '../spin/db.js';
-import { chunkLines, fmtValue } from '../spin/format.js';
+import { buildInventoryView } from '../spin/inventory.js';
 
 export const data = new SlashCommandBuilder()
   .setName('collection')
@@ -23,10 +23,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   }
 
   const target = interaction.options.getUser('user') ?? interaction.user;
-  const user = db.getUser(target.id);
-  const rows = db.getCollection(target.id);
+  const view = buildInventoryView(db.getUser(target.id), db.getCollection(target.id));
 
-  if (rows.length === 0) {
+  if (view.stacks === 0) {
     await interaction.reply({
       content: `${target.id === interaction.user.id ? 'You have' : `${target.username} has`} no petals yet. Try /spin!`,
       flags: MessageFlags.Ephemeral,
@@ -34,32 +33,13 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return;
   }
 
-  const lines: string[] = [];
-  let lastTier = -1;
-  let uniqueStacks = 0;
-  for (const row of rows) {
-    if (row.tier !== lastTier) {
-      lines.push(`**— ${rarities[row.tier]?.name ?? `Tier ${row.tier}`} —**`);
-      lastTier = row.tier;
-    }
-    const petal = findPetal(row.petal);
-    const name = petal ? displayName(petal, row.tier) : row.petal;
-    lines.push(`${name} ×${row.count}`);
-    uniqueStacks++;
-  }
-
-  const pages = chunkLines(lines);
-  const page = Math.min(interaction.options.getInteger('page') ?? 1, pages.length);
-  const highest = user.highestTier >= 0 ? rarities[user.highestTier]?.name ?? '?' : 'none';
+  const page = Math.min(interaction.options.getInteger('page') ?? 1, view.pages.length);
 
   const embed = new EmbedBuilder()
-    .setColor(user.highestTier >= 0 ? rarityColor(user.highestTier) : 0x9b59b6)
+    .setColor(view.color)
     .setTitle(`${target.username}'s collection`)
-    .setDescription(
-      `**Total worth:** ${fmtValue(user.totalValue)} • **Spins:** ${user.spinCount} • ` +
-        `**Best pull:** ${highest} • **Stacks:** ${uniqueStacks}\n\n${pages[page - 1]}`,
-    )
-    .setFooter({ text: `Page ${page}/${pages.length}` });
+    .setDescription(`${view.summary}\n\n${view.pages[page - 1]}`)
+    .setFooter({ text: `Page ${page}/${view.pages.length}` });
 
   await interaction.reply({ embeds: [embed], allowedMentions: { parse: [] } });
 }

@@ -19,11 +19,15 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const odds = tierOdds(db.getWeightOverrides());
   const tierLines = odds.map((p, i) => `**${rarities[i].name}** — ${fmtChance(p)}`);
 
+  const queue = db.getSacrificeQueue();
+  const sacNote = queue.length
+    ? ` • 🩸 Sacrifice x${queue[0].mult.toFixed(2)} active (${queue[0].spinsLeft} spins left${queue.length > 1 ? `, ${queue.length - 1} queued` : ''})`
+    : '';
   const tiersEmbed = new EmbedBuilder()
     .setColor(0x9b59b6)
     .setTitle('🎰 Spin odds — rarity tiers')
     .setDescription(tierLines.join('\n'))
-    .setFooter({ text: `Cooldown: ${fmtDuration(db.getCooldownMs())} • Luck boosts shift these odds upward` });
+    .setFooter({ text: `Cooldown: ${fmtDuration(db.getCooldownMs())} • Luck boosts shift these odds upward${sacNote}` });
 
   const specialLines = staticPetals.map((p) => {
     const gate = p.static!.minTier > 0 ? ` (${rarities[p.static!.minTier].name}+ only)` : '';

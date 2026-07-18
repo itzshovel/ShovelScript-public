@@ -42,6 +42,17 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS spin_sacrifices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    petal TEXT NOT NULL,
+    tier INTEGER NOT NULL,
+    value REAL NOT NULL,
+    mult REAL NOT NULL,
+    spins_total INTEGER NOT NULL,
+    spins_left INTEGER NOT NULL,
+    created_ms INTEGER NOT NULL
+  );
 `);
 
 export interface SpinUser {
@@ -95,6 +106,27 @@ const collectionStmt = db.prepare(
 const topStmt = db.prepare(
   'SELECT * FROM spin_users WHERE spin_count > 0 ORDER BY total_value DESC LIMIT ?',
 );
+const getStackStmt = db.prepare(
+  'SELECT count FROM spin_collection WHERE user_id = ? AND petal = ? AND tier = ?',
+);
+const decStackStmt = db.prepare(
+  'UPDATE spin_collection SET count = count - 1 WHERE user_id = ? AND petal = ? AND tier = ?',
+);
+const deleteEmptyStackStmt = db.prepare(
+  'DELETE FROM spin_collection WHERE user_id = ? AND petal = ? AND tier = ? AND count <= 0',
+);
+const adjustTotalStmt = db.prepare('UPDATE spin_users SET total_value = total_value - ? WHERE user_id = ?');
+const insertSacrificeStmt = db.prepare(`
+  INSERT INTO spin_sacrifices (user_id, petal, tier, value, mult, spins_total, spins_left, created_ms)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`);
+const sacrificeQueueStmt = db.prepare(
+  'SELECT * FROM spin_sacrifices WHERE spins_left > 0 ORDER BY id ASC',
+);
+const consumeSacrificeStmt = db.prepare(
+  'UPDATE spin_sacrifices SET spins_left = spins_left - 1 WHERE id = ?',
+);
+const clearSacrificesStmt = db.prepare('DELETE FROM spin_sacrifices WHERE spins_left > 0');
 const getCfgStmt = db.prepare('SELECT value FROM spin_config WHERE key = ?');
 const setCfgStmt = db.prepare(
   'INSERT INTO spin_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
@@ -138,6 +170,8 @@ export interface SpinRecord {
   stunnedUntilMs: number; // 0 unless a Plastic Egg stun starts now
   consumedEffectIds: number[];
   newEffects: Array<{ kind: string; mult: number; startsMs: number; expiresMs: number }>;
+  /** Active sacrifice boost that powered this spin (decrements its spins_left). */
+  consumedSacrificeId?: number | null;
 }
 
 /** Applies one spin atomically: totals, collection stack, effect changes. */
@@ -148,8 +182,86 @@ export function recordSpin(rec: SpinRecord): void {
     upsertStackStmt.run(rec.userId, rec.petal, rec.tier);
     for (const id of rec.consumedEffectIds) deleteEffectStmt.run(id);
     for (const e of rec.newEffects) insertEffectStmt.run(rec.userId, e.kind, e.mult, e.startsMs, e.expiresMs);
+    if (rec.consumedSacrificeId != null) consumeSacrificeStmt.run(rec.consumedSacrificeId);
     pruneEffectsStmt.run(rec.nowMs);
     db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+// --- sacrifices ------------------------------------------------------------
+
+export interface SacrificeRow {
+  id: number;
+  userId: string;
+  petal: string;
+  tier: number;
+  value: number;
+  mult: number;
+  spinsTotal: number;
+  spinsLeft: number;
+}
+
+function rowToSacrifice(r: Record<string, unknown>): SacrificeRow {
+  return {
+    id: Number(r.id),
+    userId: String(r.user_id),
+    petal: String(r.petal),
+    tier: Number(r.tier),
+    value: Number(r.value),
+    mult: Number(r.mult),
+    spinsTotal: Number(r.spins_total),
+    spinsLeft: Number(r.spins_left),
+  };
+}
+
+/** Pending sacrifices in activation order; index 0 is the active boost. */
+export function getSacrificeQueue(): SacrificeRow[] {
+  return (sacrificeQueueStmt.all() as Array<Record<string, unknown>>).map(rowToSacrifice);
+}
+
+export function getStackCount(userId: string, petal: string, tier: number): number {
+  const row = getStackStmt.get(userId, petal, tier) as { count: number } | undefined;
+  return row ? Number(row.count) : 0;
+}
+
+/** Dev/admin boost: enqueues a sacrifice-style luck boost with no petal burned
+ *  and no worth deducted. */
+export function enqueueDevBoost(userId: string, mult: number, spins: number, nowMs: number): void {
+  insertSacrificeStmt.run(userId, '(dev boost)', 0, 0, mult, spins, spins, nowMs);
+}
+
+/** Removes every active and queued sacrifice boost. Returns how many. */
+export function clearSacrificeQueue(): number {
+  return Number(clearSacrificesStmt.run().changes);
+}
+
+/** Burns one petal from the user's stack, deducts its value from their total
+ *  (negative values heal), and enqueues the boost. False if the stack is gone. */
+export function performSacrifice(p: {
+  userId: string;
+  petal: string;
+  tier: number;
+  value: number;
+  mult: number;
+  spins: number;
+  nowMs: number;
+}): boolean {
+  db.exec('BEGIN');
+  try {
+    const owned = getStackStmt.get(p.userId, p.petal, p.tier) as { count: number } | undefined;
+    if (!owned || Number(owned.count) <= 0) {
+      db.exec('ROLLBACK');
+      return false;
+    }
+    decStackStmt.run(p.userId, p.petal, p.tier);
+    deleteEmptyStackStmt.run(p.userId, p.petal, p.tier);
+    adjustTotalStmt.run(p.value, p.userId);
+    insertSacrificeStmt.run(p.userId, p.petal, p.tier, p.value, p.mult, p.spins, p.spins, p.nowMs);
+    db.exec('COMMIT');
+    return true;
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
@@ -191,6 +303,16 @@ export function getFlairTier(): number {
 
 export function setFlairTier(tier: number): void {
   setCfgStmt.run('flair_tier', String(tier));
+}
+
+/** Channel /spin is locked to; null = usable anywhere. */
+export function getSpinChannelId(): string | null {
+  const v = cfgGet('spin_channel_id');
+  return v ? v : null;
+}
+
+export function setSpinChannelId(id: string | null): void {
+  setCfgStmt.run('spin_channel_id', id ?? '');
 }
 
 /** Staff odds overrides: tier index -> weight multiplier (1 = default, 0 = disabled). */

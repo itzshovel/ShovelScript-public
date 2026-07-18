@@ -38,12 +38,22 @@ export interface LuckResult {
 }
 
 /** Combine active luck effects at `now`: timed boosts stack additively, then
- *  one-shot boosts (clover, token) multiply the total and are consumed. */
-export function computeLuck(effects: EffectRow[], now: number): LuckResult {
+ *  one-shot boosts (clover, token) multiply the total and are consumed.
+ *  `globalBoosts` (e.g. an active sacrifice) join the additive pool. */
+export function computeLuck(
+  effects: EffectRow[],
+  now: number,
+  globalBoosts: Array<{ label: string; mult: number }> = [],
+): LuckResult {
   let additive = 1;
   let oneShot = 1;
   const consumedIds: number[] = [];
   const parts: string[] = [];
+
+  for (const g of globalBoosts) {
+    additive += g.mult - 1;
+    parts.push(g.label);
+  }
 
   for (const e of effects) {
     if (e.expiresMs === -1) {
@@ -205,6 +215,64 @@ export function resolveEffect(petal: SpinPetal, now: number, rng: Rng): EffectOu
 /** Whether a Royal Serum value boost is active at `now`. */
 export function serumActive(effects: EffectRow[], now: number): boolean {
   return effects.some((e) => e.kind === 'serum' && now >= e.startsMs && now < e.expiresMs);
+}
+
+// --- sacrifice system ------------------------------------------------------
+
+/** Fraction of a sacrifice's value redistributed back through boosted spins. */
+export const SACRIFICE_REDIST = 0.8;
+export const SACRIFICE_LUCK_CAP = 15;
+
+/** Expected POOL pull value of one spin at luck L on the default curve.
+ *  Static specials are deliberately excluded: Card/Cash/Shiny Cash's squared
+ *  and cubed value formulas make the true mean astronomically dominated by
+ *  once-in-a-trillion jackpots (~5e19 per spin), which would make every
+ *  sacrifice boost solve to x1. Calibrating against the pool matches what a
+ *  spin typically pays; the jackpot tail rides on top as a bonus. */
+export function expectedValuePerSpin(luck: number): number {
+  const r = Math.pow(TIER_RATIO, 1 / Math.max(luck, 0.01));
+  const tierW: number[] = [];
+  let totalW = 0;
+  for (let i = 0; i < rarities.length; i++) {
+    const w = Math.pow(r, -i);
+    tierW.push(w);
+    totalW += w;
+  }
+  let poolW = 0;
+  let poolSigned = 0;
+  for (const p of poolPetals) {
+    const w = poolWeight(p);
+    poolW += w;
+    poolSigned += w * p.mult;
+  }
+  const poolMeanMult = poolSigned / poolW;
+
+  let ev = 0;
+  for (let i = 0; i < rarities.length; i++) {
+    ev += (tierW[i] / totalW) * poolMeanMult * rarityValue(i);
+  }
+  return ev;
+}
+
+/** Boost bought by sacrificing |value|: duration scales with log10 of the
+ *  value, and the multiplier is solved so the boosted spins' extra expected
+ *  value repays SACRIFICE_REDIST of it on average (capped — huge jackpot
+ *  sacrifices can never be fully repaid within one boost). */
+export function sacrificeBoost(absValue: number): { mult: number; spins: number } {
+  const spins = Math.min(25, Math.max(3, 3 + 2 * Math.floor(Math.log10(1 + absValue))));
+  const targetPerSpin = (SACRIFICE_REDIST * absValue) / spins;
+  const base = expectedValuePerSpin(1);
+  if (expectedValuePerSpin(SACRIFICE_LUCK_CAP) - base <= targetPerSpin) {
+    return { mult: SACRIFICE_LUCK_CAP, spins };
+  }
+  let lo = 1;
+  let hi = SACRIFICE_LUCK_CAP;
+  for (let iter = 0; iter < 60; iter++) {
+    const mid = (lo + hi) / 2;
+    if (expectedValuePerSpin(mid) - base < targetPerSpin) lo = mid;
+    else hi = mid;
+  }
+  return { mult: (lo + hi) / 2, spins };
 }
 
 /** Current tier odds (no luck), for /spinodds: probability per tier. */

@@ -6,7 +6,8 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ComponentType,
+  ChannelSelectMenuBuilder,
+  ChannelType,
   EmbedBuilder,
   GuildMemberRoleManager,
   MessageFlags,
@@ -25,7 +26,7 @@ import { fmtDuration, parseDuration } from '../spin/format.js';
 
 export const data = new SlashCommandBuilder()
   .setName('spinconfig')
-  .setDescription('Adjust /spin cooldown, flair tier, and odds (staff only).');
+  .setDescription('Adjust /spin cooldown, flair tier, odds, and channel lock (staff only).');
 
 // Same dual-shape role check as /setup (GuildMember vs raw API member).
 function hasStaffRole(interaction: ChatInputCommandInteraction): boolean {
@@ -44,12 +45,14 @@ function configEmbed(): EmbedBuilder {
         .join(', ')
     : 'none (default 1.5x curve)';
   const flair = db.getFlairTier();
+  const channelId = db.getSpinChannelId();
   return new EmbedBuilder()
     .setColor(0x9b59b6)
     .setTitle('⚙️ Spin config')
     .addFields(
       { name: 'Cooldown', value: fmtDuration(db.getCooldownMs()), inline: true },
       { name: 'Flair from', value: `${rarities[flair]?.name ?? '?'} (tier ${flair})`, inline: true },
+      { name: 'Spin channel', value: channelId ? `<#${channelId}>` : 'anywhere', inline: true },
       { name: 'Odds overrides', value: overrideText },
     )
     .setFooter({ text: 'Buttons below edit values. Menu expires after 5 minutes.' });
@@ -115,26 +118,48 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   }
 
   const sid = interaction.id;
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`spincfg:cd:${sid}`).setLabel('Cooldown').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`spincfg:flair:${sid}`).setLabel('Flair tier').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`spincfg:weight:${sid}`).setLabel('Tier weight').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`spincfg:reset:${sid}`).setLabel('Reset weights').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`spincfg:unlock:${sid}`).setLabel('Unlock channel').setStyle(ButtonStyle.Secondary),
+  );
+  const channelRow = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
+    new ChannelSelectMenuBuilder()
+      .setCustomId(`spincfg:chan:${sid}`)
+      .setPlaceholder('Lock /spin to a channel…')
+      .setChannelTypes(ChannelType.GuildText),
   );
 
-  await interaction.reply({ embeds: [configEmbed()], components: [row], flags: MessageFlags.Ephemeral });
+  await interaction.reply({
+    embeds: [configEmbed()],
+    components: [buttonRow, channelRow],
+    flags: MessageFlags.Ephemeral,
+  });
   const message = await interaction.fetchReply();
 
   const collector = message.createMessageComponentCollector({
-    componentType: ComponentType.Button,
     time: 300_000,
     filter: (i) => i.user.id === interaction.user.id,
   });
 
-  collector.on('collect', (btn) => {
+  collector.on('collect', (component) => {
     void (async () => {
+      if (component.isChannelSelectMenu()) {
+        db.setSpinChannelId(component.values[0]);
+        await component.update({ embeds: [configEmbed()] });
+        return;
+      }
+      if (!component.isButton()) return;
+      const btn: ButtonInteraction = component;
       const action = btn.customId.split(':')[1];
 
+      if (action === 'unlock') {
+        db.setSpinChannelId(null);
+        await btn.update({ embeds: [configEmbed()] });
+        return;
+      }
       if (action === 'reset') {
         db.resetWeightOverrides();
         await btn.update({ embeds: [configEmbed()] });
