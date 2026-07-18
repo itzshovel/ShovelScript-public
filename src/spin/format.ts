@@ -24,6 +24,11 @@ export function fmtSigned(v: number): string {
   return (v >= 0 ? '+' : '') + fmtValue(v);
 }
 
+/** Luck multipliers: exact to 2dp when small, abbreviated when huge ("x30k"). */
+export function fmtMult(m: number): string {
+  return m < 1000 ? m.toFixed(2).replace(/\.?0+$/, '') : fmtValue(m);
+}
+
 /** "33.3% (1 in 3)" — for the odds table. */
 export function fmtChance(p: number): string {
   if (p <= 0) return 'disabled';

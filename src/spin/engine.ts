@@ -94,17 +94,27 @@ function trim(n: number): string {
   return n.toFixed(2).replace(/\.?0+$/, '');
 }
 
-/** Roll a rarity tier. Weight_i = (1/r)^i with r = 1.5^(1/luck), times any
- *  staff override for that tier (0 disables a tier). */
-export function rollTier(luck: number, overrides: Record<number, number>, rng: Rng): number {
-  const r = Math.pow(TIER_RATIO, 1 / Math.max(luck, 0.01));
+/** Per-tier roll weights at luck L. Baseline weight is (1/1.5)^i; luck boosts
+ *  a tier's relative likelihood by min(1.5^(i*(1-1/L)), L) — the curve softens
+ *  with depth but is CLAMPED so no tier ever becomes more than Lx more likely
+ *  than baseline ("x5 luck" = at most 5x the normal odds, deep tiers exactly
+ *  5x). Staff overrides multiply on top (0 disables a tier). */
+export function tierWeights(luck: number, overrides: Record<number, number> = {}): number[] {
+  const L = Math.max(luck, 1);
+  const soften = 1 - 1 / L;
   const weights: number[] = [];
-  let total = 0;
   for (let i = 0; i < rarities.length; i++) {
-    const w = Math.pow(r, -i) * (overrides[i] ?? 1);
-    weights.push(w);
-    total += w;
+    const boost = Math.min(Math.pow(TIER_RATIO, i * soften), L);
+    weights.push(Math.pow(TIER_RATIO, -i) * boost * (overrides[i] ?? 1));
   }
+  return weights;
+}
+
+/** Roll a rarity tier using the clamped-luck weights. */
+export function rollTier(luck: number, overrides: Record<number, number>, rng: Rng): number {
+  const weights = tierWeights(luck, overrides);
+  let total = 0;
+  for (const w of weights) total += w;
   let roll = rng() * total;
   for (let i = 0; i < weights.length; i++) {
     roll -= weights[i];
@@ -221,23 +231,22 @@ export function serumActive(effects: EffectRow[], now: number): boolean {
 
 /** Fraction of a sacrifice's value redistributed back through boosted spins. */
 export const SACRIFICE_REDIST = 0.8;
-export const SACRIFICE_LUCK_CAP = 15;
+/** Luck beyond this adds nothing: the odds are already fully flat (every
+ *  tier's clamp at Lx has disengaged). The solver pins here for sacrifices
+ *  whose value no amount of luck can repay (jackpot pulls). */
+export const SACRIFICE_LUCK_MAX = Math.pow(TIER_RATIO, rarities.length + 1);
 
-/** Expected POOL pull value of one spin at luck L on the default curve.
+/** Expected POOL pull value of one spin at luck L under the clamped model.
  *  Static specials are deliberately excluded: Card/Cash/Shiny Cash's squared
  *  and cubed value formulas make the true mean astronomically dominated by
  *  once-in-a-trillion jackpots (~5e19 per spin), which would make every
  *  sacrifice boost solve to x1. Calibrating against the pool matches what a
  *  spin typically pays; the jackpot tail rides on top as a bonus. */
 export function expectedValuePerSpin(luck: number): number {
-  const r = Math.pow(TIER_RATIO, 1 / Math.max(luck, 0.01));
-  const tierW: number[] = [];
+  const weights = tierWeights(luck);
   let totalW = 0;
-  for (let i = 0; i < rarities.length; i++) {
-    const w = Math.pow(r, -i);
-    tierW.push(w);
-    totalW += w;
-  }
+  for (const w of weights) totalW += w;
+
   let poolW = 0;
   let poolSigned = 0;
   for (const p of poolPetals) {
@@ -249,25 +258,27 @@ export function expectedValuePerSpin(luck: number): number {
 
   let ev = 0;
   for (let i = 0; i < rarities.length; i++) {
-    ev += (tierW[i] / totalW) * poolMeanMult * rarityValue(i);
+    ev += (weights[i] / totalW) * poolMeanMult * rarityValue(i);
   }
   return ev;
 }
 
 /** Boost bought by sacrificing |value|: duration scales with log10 of the
- *  value, and the multiplier is solved so the boosted spins' extra expected
- *  value repays SACRIFICE_REDIST of it on average (capped — huge jackpot
- *  sacrifices can never be fully repaid within one boost). */
+ *  value, and the multiplier is solved (uncapped) so the boosted spins' extra
+ *  expected value repays SACRIFICE_REDIST of it on average. Under clamped
+ *  luck that means big sacrifices get very large multipliers; sacrifices no
+ *  luck can repay (jackpots) pin at SACRIFICE_LUCK_MAX (fully flat odds). */
 export function sacrificeBoost(absValue: number): { mult: number; spins: number } {
   const spins = Math.min(25, Math.max(3, 3 + 2 * Math.floor(Math.log10(1 + absValue))));
   const targetPerSpin = (SACRIFICE_REDIST * absValue) / spins;
   const base = expectedValuePerSpin(1);
-  if (expectedValuePerSpin(SACRIFICE_LUCK_CAP) - base <= targetPerSpin) {
-    return { mult: SACRIFICE_LUCK_CAP, spins };
+  if (expectedValuePerSpin(SACRIFICE_LUCK_MAX) - base <= targetPerSpin) {
+    return { mult: SACRIFICE_LUCK_MAX, spins };
   }
   let lo = 1;
-  let hi = SACRIFICE_LUCK_CAP;
-  for (let iter = 0; iter < 60; iter++) {
+  let hi = 2;
+  while (expectedValuePerSpin(hi) - base < targetPerSpin) hi *= 2;
+  for (let iter = 0; iter < 80; iter++) {
     const mid = (lo + hi) / 2;
     if (expectedValuePerSpin(mid) - base < targetPerSpin) lo = mid;
     else hi = mid;
@@ -277,12 +288,8 @@ export function sacrificeBoost(absValue: number): { mult: number; spins: number 
 
 /** Current tier odds (no luck), for /spinodds: probability per tier. */
 export function tierOdds(overrides: Record<number, number>): number[] {
-  const weights: number[] = [];
+  const weights = tierWeights(1, overrides);
   let total = 0;
-  for (let i = 0; i < rarities.length; i++) {
-    const w = Math.pow(TIER_RATIO, -i) * (overrides[i] ?? 1);
-    weights.push(w);
-    total += w;
-  }
+  for (const w of weights) total += w;
   return weights.map((w) => w / total);
 }

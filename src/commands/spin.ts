@@ -10,7 +10,7 @@ import {
 import { displayName, MISSILE_FAMILY, petalImage, rarities, rarityColor } from '../spin/data.js';
 import * as db from '../spin/db.js';
 import * as engine from '../spin/engine.js';
-import { fmtSigned, fmtValue } from '../spin/format.js';
+import { fmtMult, fmtSigned, fmtValue } from '../spin/format.js';
 
 export const data = new SlashCommandBuilder()
   .setName('spin')
@@ -57,7 +57,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const effects = db.getEffects(userId);
   const sacrifice = db.getSacrificeQueue()[0];
   const globalBoosts = sacrifice
-    ? [{ label: `Sacrifice x${sacrifice.mult.toFixed(2)} (${sacrifice.spinsLeft} left)`, mult: sacrifice.mult }]
+    ? [{ label: `Sacrifice x${fmtMult(sacrifice.mult)} (${sacrifice.spinsLeft} left)`, mult: sacrifice.mult }]
     : [];
   const { luck, consumedIds, parts } = engine.computeLuck(effects, now, globalBoosts);
   const tier = engine.rollTier(luck, db.getWeightOverrides(), rng);
@@ -97,7 +97,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     .setFooter({ text: `Tier ${tier + 1}/${rarities.length} • Spin #${user.spinCount + 1}` });
 
   if (luck !== 1) {
-    embed.addFields({ name: 'Luck', value: `x${luck.toFixed(2).replace(/\.?0+$/, '')} (${parts.join(', ')})`, inline: true });
+    embed.addFields({ name: 'Luck', value: `x${fmtMult(luck)} (${parts.join(', ')})`, inline: true });
   }
   if (serum && MISSILE_FAMILY.has(petal.name)) {
     embed.addFields({ name: 'Serum', value: '🧪 3x missile bonus applied', inline: true });

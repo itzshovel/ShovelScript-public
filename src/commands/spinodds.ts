@@ -8,7 +8,7 @@ import {
 } from 'discord.js';
 import { rarities, staticPetals } from '../spin/data.js';
 import * as db from '../spin/db.js';
-import { fmtChance, fmtDuration } from '../spin/format.js';
+import { fmtChance, fmtDuration, fmtMult } from '../spin/format.js';
 import { tierOdds } from '../spin/engine.js';
 
 export const data = new SlashCommandBuilder()
@@ -21,7 +21,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   const queue = db.getSacrificeQueue();
   const sacNote = queue.length
-    ? ` • 🩸 Sacrifice x${queue[0].mult.toFixed(2)} active (${queue[0].spinsLeft} spins left${queue.length > 1 ? `, ${queue.length - 1} queued` : ''})`
+    ? ` • 🩸 Sacrifice x${fmtMult(queue[0].mult)} active (${queue[0].spinsLeft} spins left${queue.length > 1 ? `, ${queue.length - 1} queued` : ''})`
     : '';
   const tiersEmbed = new EmbedBuilder()
     .setColor(0x9b59b6)

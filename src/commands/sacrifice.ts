@@ -25,7 +25,7 @@ import {
 } from '../spin/data.js';
 import * as db from '../spin/db.js';
 import * as engine from '../spin/engine.js';
-import { fmtValue } from '../spin/format.js';
+import { fmtMult, fmtValue } from '../spin/format.js';
 
 export const data = new SlashCommandBuilder()
   .setName('sacrifice')
@@ -96,7 +96,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     .setTitle(`🩸 Sacrifice ${rarities[tier].name} ${name}?`)
     .setDescription(
       `Worth ${fmtValue(value)} (you own ×${owned}). ${worthNote}\n` +
-        `The server gains **x${mult.toFixed(2)} luck for ${spins} spins** (anyone's spins).${queueNote}\n\n` +
+        `The server gains **x${fmtMult(mult)} luck for ${spins} spins** (anyone's spins).${queueNote}\n\n` +
         `This cannot be undone.`,
     );
 
@@ -150,7 +150,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     .setColor(rarityColor(tier))
     .setTitle(`🩸 ${interaction.user.username} sacrificed a ${rarities[tier].name} ${name}!`)
     .setDescription(
-      `Worth ${fmtValue(value)} — the server gains **x${mult.toFixed(2)} luck for ${spins} spins**.\n` +
+      `Worth ${fmtValue(value)} — the server gains **x${fmtMult(mult)} luck for ${spins} spins**.\n` +
         (isActive ? 'The boost is **live now** — go spin!' : `Queued: it activates after the current boost${nowQueued.length > 2 ? 'es' : ''} run out.`),
     )
     .setThumbnail('attachment://petal.png')

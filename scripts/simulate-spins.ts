@@ -59,7 +59,25 @@ const luckyCounts = new Array(rarities.length).fill(0);
 for (let i = 0; i < N / 4; i++) luckyCounts[engine.rollTier(10, {}, rng)]++;
 let meanLucky = 0;
 for (let i = 0; i < rarities.length; i++) meanLucky += (i * luckyCounts[i]) / (N / 4);
-check('10x luck raises mean tier a lot', meanLucky > meanBase + 8, `base ${meanBase.toFixed(2)} → lucky ${meanLucky.toFixed(2)}`);
+check(
+  '10x luck raises mean tier moderately (clamped)',
+  meanLucky > meanBase + 1.5 && meanLucky < meanBase + 8,
+  `base ${meanBase.toFixed(2)} → lucky ${meanLucky.toFixed(2)}`,
+);
+
+// Clamp semantics: at L=5, a deep tier is exactly 5x more likely relative to
+// tier 0 than at baseline; a shallow tier gets only its softened boost (<5x).
+const w1 = engine.tierWeights(1);
+const w5 = engine.tierWeights(5);
+const deepBoost = (w5[68] / w5[0]) / (w1[68] / w1[0]);
+check('x5 luck: deep tier exactly 5x more likely', Math.abs(deepBoost - 5) < 1e-9, deepBoost.toFixed(4));
+const shallowBoost = (w5[3] / w5[0]) / (w1[3] / w1[0]);
+const expectedShallow = Math.pow(1.5, 3 * (1 - 1 / 5));
+check(
+  'x5 luck: shallow tier gets softened boost < 5x',
+  Math.abs(shallowBoost - expectedShallow) < 1e-9 && shallowBoost < 5,
+  shallowBoost.toFixed(4),
+);
 
 const disabled = engine.tierOdds({ 0: 0 });
 check('override 0 disables a tier', disabled[0] === 0);
@@ -167,8 +185,16 @@ check(
   `x${hex.mult.toFixed(3)} for ${hex.spins} spins`,
 );
 
+const t68 = engine.sacrificeBoost(rarityValue(68));
+const t68Repaid = (engine.expectedValuePerSpin(t68.mult) - evBase) * t68.spins;
+check(
+  'tier-68 sacrifice repays ~80% via huge mult',
+  Math.abs(t68Repaid - 0.8 * rarityValue(68)) / (0.8 * rarityValue(68)) < 0.01,
+  `x${t68.mult.toExponential(2)} for ${t68.spins} spins`,
+);
+
 const jackpot = engine.sacrificeBoost(4e24);
-check('unrepayable jackpot hits the cap', jackpot.mult === engine.SACRIFICE_LUCK_CAP && jackpot.spins === 25);
+check('unrepayable jackpot pins at fully-flat luck', jackpot.mult === engine.SACRIFICE_LUCK_MAX && jackpot.spins === 25);
 
 const negSame = engine.sacrificeBoost(Math.abs(-2 * rarityValue(10)));
 const posSame = engine.sacrificeBoost(2 * rarityValue(10));
