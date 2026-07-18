@@ -11,16 +11,17 @@ import {
   type ChatInputCommandInteraction,
 } from 'discord.js';
 import * as db from '../spin/db.js';
+import { fmtMult } from '../spin/format.js';
 
 export const data = new SlashCommandBuilder()
   .setName('devsacrifice')
   .setDescription('Dev: apply a sacrifice luck boost without burning a petal (admin only).')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addNumberOption((o) =>
-    o.setName('multiplier').setDescription('Luck multiplier, e.g. 2.5').setRequired(true).setMinValue(1).setMaxValue(1000),
+    o.setName('multiplier').setDescription('Luck multiplier, e.g. 2.5').setRequired(true).setMinValue(1),
   )
   .addIntegerOption((o) =>
-    o.setName('duration').setDescription('How many server-wide spins it lasts').setRequired(true).setMinValue(1).setMaxValue(10000),
+    o.setName('duration').setDescription('How many server-wide spins it lasts').setRequired(true).setMinValue(1),
   )
   .addBooleanOption((o) =>
     o.setName('clear').setDescription('Wipe all active/queued sacrifice boosts first (default: no)'),
@@ -56,7 +57,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   await interaction.reply({
     content:
-      `⚗️ Dev boost queued: **x${mult} luck for ${spins} spins**` +
+      `⚗️ Dev boost queued: **x${fmtMult(mult)} luck for ${spins} spins**` +
       (clear ? ` (cleared ${cleared} existing boost${cleared === 1 ? '' : 's'} first)` : '') +
       (isActive ? ' — live now.' : ` — position ${queue.length} in the queue.`),
     flags: MessageFlags.Ephemeral,
@@ -67,7 +68,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       .setColor(0xf1c40f)
       .setTitle('⚗️ The spirits are generous!')
       .setDescription(
-        `A **x${mult} luck boost for ${spins} spins** has been granted to the server.\n` +
+        `A **x${fmtMult(mult)} luck boost for ${spins} spins** has been granted to the server.\n` +
           (isActive ? 'It is **live now** — go spin!' : 'It activates after the current boosts run out.'),
       )
       .setFooter({ text: 'Applies to everyone\'s spins' });
