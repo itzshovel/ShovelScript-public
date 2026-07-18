@@ -9,6 +9,7 @@ import * as collection from './collection.js';
 import * as spintop from './spintop.js';
 import * as spinodds from './spinodds.js';
 import * as spinconfig from './spinconfig.js';
+import * as testspin from './testspin.js';
 
 export interface Command {
   data: { name: string; toJSON(): unknown };
@@ -17,6 +18,6 @@ export interface Command {
 
 export const commands: Command[] = [
   script, version, changelog, help, setup,
-  spin, collection, spintop, spinodds, spinconfig,
+  spin, collection, spintop, spinodds, spinconfig, testspin,
 ];
 export const commandMap = new Map<string, Command>(commands.map((c) => [c.data.name, c]));
