@@ -359,3 +359,13 @@ export function setWeightOverride(tier: number, mult: number): void {
 export function resetWeightOverrides(): void {
   setCfgStmt.run('weight_overrides', '{}');
 }
+
+/** Chat command prefix for message commands ("!" by default). */
+export function getPrefix(): string {
+  const v = cfgGet('chat_prefix');
+  return v ? v : '!';
+}
+
+export function setPrefix(prefix: string): void {
+  setCfgStmt.run('chat_prefix', prefix);
+}

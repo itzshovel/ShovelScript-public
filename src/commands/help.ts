@@ -1,5 +1,6 @@
 import { EmbedBuilder, MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
 import { installButtonRow } from '../embeds.js';
+import { getPrefix } from '../spin/db.js';
 
 export const data = new SlashCommandBuilder()
   .setName('help')
@@ -15,6 +16,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         '**/version** — the latest version number and what changed.',
         '**/changelog** `[version]` — release notes for a version, or recent history.',
         '**/help** — this message.',
+        '',
+        `Slash commands also work as chat messages with the \`${getPrefix()}\` prefix — e.g. \`${getPrefix()}spin\`, \`${getPrefix()}inventory\`.`,
         '',
         'Install via the **📥 button** and Tampermonkey keeps you auto-updated — no need to come back here for new versions.',
       ].join('\n'),

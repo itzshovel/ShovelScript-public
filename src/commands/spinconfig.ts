@@ -26,7 +26,7 @@ import { fmtDuration, parseDuration } from '../spin/format.js';
 
 export const data = new SlashCommandBuilder()
   .setName('spinconfig')
-  .setDescription('Adjust /spin cooldown, flair tier, odds, and channel lock (staff only).');
+  .setDescription('Adjust /spin cooldown, flair tier, odds, channel lock, and chat prefix (staff only).');
 
 // Same dual-shape role check as /setup (GuildMember vs raw API member).
 function hasStaffRole(interaction: ChatInputCommandInteraction): boolean {
@@ -53,6 +53,7 @@ function configEmbed(): EmbedBuilder {
       { name: 'Cooldown', value: fmtDuration(db.getCooldownMs()), inline: true },
       { name: 'Flair from', value: `${rarities[flair]?.name ?? '?'} (tier ${flair})`, inline: true },
       { name: 'Spin channel', value: channelId ? `<#${channelId}>` : 'anywhere', inline: true },
+      { name: 'Chat prefix', value: `\`${db.getPrefix()}\``, inline: true },
       { name: 'Odds overrides', value: overrideText },
     )
     .setFooter({ text: 'Buttons below edit values. Menu expires after 5 minutes.' });
@@ -125,6 +126,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     new ButtonBuilder().setCustomId(`spincfg:reset:${sid}`).setLabel('Reset weights').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`spincfg:unlock:${sid}`).setLabel('Unlock channel').setStyle(ButtonStyle.Secondary),
   );
+  const prefixRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`spincfg:prefix:${sid}`).setLabel('Chat prefix').setStyle(ButtonStyle.Primary),
+  );
   const channelRow = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
     new ChannelSelectMenuBuilder()
       .setCustomId(`spincfg:chan:${sid}`)
@@ -134,7 +138,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   await interaction.reply({
     embeds: [configEmbed()],
-    components: [buttonRow, channelRow],
+    components: [buttonRow, prefixRow, channelRow],
     flags: MessageFlags.Ephemeral,
   });
   const message = await interaction.fetchReply();
@@ -208,6 +212,21 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
             if (!Number.isFinite(mult) || mult < 0) throw new Error('Multiplier must be a number ≥ 0.');
             db.setWeightOverride(tier, mult);
             return `✅ ${rarities[tier].name} weight ×${mult}${mult === 1 ? ' (back to default)' : ''}.`;
+          },
+        );
+      } else if (action === 'prefix') {
+        await handleModal(
+          btn,
+          textModal(`spincfg:prefixm:${sid}`, 'Chat command prefix', [
+            { id: 'value', label: 'Prefix (1-5 characters, no spaces)', placeholder: '!' },
+          ]),
+          (submit) => {
+            const p = submit.fields.getTextInputValue('value').trim();
+            if (!p || p.length > 5 || /\s/.test(p)) {
+              throw new Error('Prefix must be 1-5 characters with no spaces.');
+            }
+            db.setPrefix(p);
+            return `✅ Chat commands now start with \`${p}\` (e.g. \`${p}spin\`).`;
           },
         );
       }

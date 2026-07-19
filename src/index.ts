@@ -2,13 +2,21 @@ import { Client, Events, GatewayIntentBits, MessageFlags, type Interaction } fro
 import { config } from './config.js';
 import { commandMap } from './commands/index.js';
 import { registerCommands } from './deploy-commands.js';
+import { handlePrefixMessage } from './prefix.js';
 
-// Only the Guilds intent is needed: slash commands, sending, and pinning don't
-// require message-content or member intents.
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+// Guilds covers slash commands and sending. GuildMessages + MessageContent
+// power the "!spin"-style chat commands — MessageContent is a privileged
+// intent and must also be enabled on the bot's Developer Portal page.
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+});
 
 client.once(Events.ClientReady, (c) => {
   console.log(`Logged in as ${c.user.tag} — serving guild ${config.guildId}`);
+});
+
+client.on(Events.MessageCreate, (message) => {
+  void handlePrefixMessage(message).catch((err) => console.error('prefix command error:', err));
 });
 
 client.on(Events.InteractionCreate, async (interaction: Interaction) => {
