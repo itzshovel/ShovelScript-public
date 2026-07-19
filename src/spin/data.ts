@@ -49,12 +49,20 @@ export const poolPetals: readonly SpinPetal[] = data.petals.filter((p) => !p.sta
 
 export const MISSILE_FAMILY = new Set(['Missile', 'Homing Missile', 'Fire Missile']);
 
-/** Base odds ratio between adjacent tiers, and the per-tier value multiplier base. */
+/** Base odds ratio between adjacent tiers. */
 export const TIER_RATIO = 1.5;
 
-/** Value multiplier of a rarity tier: 1.5^tier (mirrors how much rarer it is). */
+// Tuned base value curve: compounding early game, linear mid game, compounding
+// late game. Pieces join continuously at tiers 20 and 50.
+const CURVE_MID_START = 5 * Math.pow(1.09, 20); // ≈ 28.02 at tier 20
+const CURVE_END_START = CURVE_MID_START + 1.6 * 30; // ≈ 76.02 at tier 50
+
+/** Base value of a rarity tier along the tuned curve: 5 at tier 0, ~28 at
+ *  tier 20, ~76 at tier 50, ~135 at tier 68. Odds stay on the 1.5x ladder. */
 export function rarityValue(tier: number): number {
-  return Math.pow(TIER_RATIO, tier);
+  if (tier <= 20) return 5 * Math.pow(1.09, tier);
+  if (tier <= 50) return CURVE_MID_START + 1.6 * (tier - 20);
+  return CURVE_END_START + (1.5 * (Math.pow(1.085, tier - 50) - 1)) / 0.085;
 }
 
 /** Pool roll weight: 1 / |mult|, with Clover's luck value standing in for its mult. */

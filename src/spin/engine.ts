@@ -7,7 +7,8 @@
 //   individual tier weights.
 // - Petal: static specials first (fixed chance, tier-gated, rarest checked
 //   first), then a weighted pick over the pool at weight 1/|mult|.
-// - Value: mult * 1.5^tier, except Card 5*R^2, Cash 7.5*R^2 and
+// - Value: mult * R, where R follows the tuned piecewise curve in data.ts
+//   (5 at tier 0 up to ~135 at tier 68), except Card 5*R^2, Cash 7.5*R^2 and
 //   Shiny Cash 2 * R(highest tier ever) * R^2. Royal Serum triples missiles.
 
 import {
@@ -238,10 +239,10 @@ export const SACRIFICE_LUCK_MAX = Math.pow(TIER_RATIO, rarities.length + 1);
 
 /** Expected POOL pull value of one spin at luck L under the clamped model.
  *  Static specials are deliberately excluded: Card/Cash/Shiny Cash's squared
- *  and cubed value formulas make the true mean astronomically dominated by
- *  once-in-a-trillion jackpots (~5e19 per spin), which would make every
- *  sacrifice boost solve to x1. Calibrating against the pool matches what a
- *  spin typically pays; the jackpot tail rides on top as a bonus. */
+ *  and cubed value formulas ride on tiny fixed chances a boost window almost
+ *  never sees, and including them would skew the calibration toward jackpots.
+ *  Calibrating against the pool matches what a spin typically pays; the
+ *  jackpot tail rides on top as a bonus. */
 export function expectedValuePerSpin(luck: number): number {
   const weights = tierWeights(luck);
   let totalW = 0;
@@ -265,9 +266,9 @@ export function expectedValuePerSpin(luck: number): number {
 
 /** Boost bought by sacrificing |value|: duration scales with log10 of the
  *  value, and the multiplier is solved (uncapped) so the boosted spins' extra
- *  expected value repays SACRIFICE_REDIST of it on average. Under clamped
- *  luck that means big sacrifices get very large multipliers; sacrifices no
- *  luck can repay (jackpots) pin at SACRIFICE_LUCK_MAX (fully flat odds). */
+ *  expected value repays SACRIFICE_REDIST of it on average. Sacrifices no
+ *  luck can repay (jackpot-grade values above what flat odds return over the
+ *  boost window) pin at SACRIFICE_LUCK_MAX (fully flat odds). */
 export function sacrificeBoost(absValue: number): { mult: number; spins: number } {
   const spins = Math.min(25, Math.max(3, 3 + 2 * Math.floor(Math.log10(1 + absValue))));
   const targetPerSpin = (SACRIFICE_REDIST * absValue) / spins;

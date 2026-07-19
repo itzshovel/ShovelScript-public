@@ -167,47 +167,44 @@ check('EV(1) positive and sane', evBase > 5 && evBase < 100, evBase.toFixed(2));
 check('EV monotone in luck', engine.expectedValuePerSpin(2) > evBase && engine.expectedValuePerSpin(5) > engine.expectedValuePerSpin(2));
 
 const tiny = engine.sacrificeBoost(1);
-check('tiny sacrifice: 3 spins, ~1x luck', tiny.spins === 3 && tiny.mult >= 1 && tiny.mult < 1.1, `x${tiny.mult.toFixed(4)}`);
+check('tiny sacrifice: 3 spins, small mult', tiny.spins === 3 && tiny.mult >= 1 && tiny.mult < 3, `x${tiny.mult.toFixed(4)}`);
 
-const mid = engine.sacrificeBoost(1e6);
+const mid = engine.sacrificeBoost(200);
 const midRepaid = (engine.expectedValuePerSpin(mid.mult) - evBase) * mid.spins;
 check(
-  'mid sacrifice repays ~80% of 1e6',
-  Math.abs(midRepaid - 0.8e6) / 0.8e6 < 0.01,
-  `x${mid.mult.toFixed(3)} for ${mid.spins} spins repays ${fmt(midRepaid)}`,
-);
-
-const hex = engine.sacrificeBoost(666 * rarityValue(8));
-const hexRepaid = (engine.expectedValuePerSpin(hex.mult) - evBase) * hex.spins;
-check(
-  'Omega Hexagon sacrifice repays ~80%',
-  Math.abs(hexRepaid - 0.8 * 666 * rarityValue(8)) / (0.8 * 666 * rarityValue(8)) < 0.01,
-  `x${hex.mult.toFixed(3)} for ${hex.spins} spins`,
+  'mid sacrifice repays ~80% of 200',
+  Math.abs(midRepaid - 0.8 * 200) / (0.8 * 200) < 0.01,
+  `x${mid.mult.toFixed(3)} for ${mid.spins} spins repays ${midRepaid.toFixed(1)}`,
 );
 
 const t68 = engine.sacrificeBoost(rarityValue(68));
 const t68Repaid = (engine.expectedValuePerSpin(t68.mult) - evBase) * t68.spins;
 check(
-  'tier-68 sacrifice repays ~80% via huge mult',
+  'tier-68 normal sacrifice repays ~80%',
   Math.abs(t68Repaid - 0.8 * rarityValue(68)) / (0.8 * rarityValue(68)) < 0.01,
-  `x${t68.mult.toExponential(2)} for ${t68.spins} spins`,
+  `x${t68.mult.toFixed(3)} for ${t68.spins} spins`,
 );
 
-const jackpot = engine.sacrificeBoost(4e24);
-check('unrepayable jackpot pins at fully-flat luck', jackpot.mult === engine.SACRIFICE_LUCK_MAX && jackpot.spins === 25);
+// The curve compresses top values, so even flat odds can only return so much
+// per spin: values beyond that ceiling (high-mult petals, Card/Cash jackpots)
+// pin at fully-flat odds instead of solving.
+const hex = engine.sacrificeBoost(666 * rarityValue(8));
+check(
+  'Omega Hexagon (beyond flat-odds ceiling) pins at fully-flat luck',
+  hex.mult === engine.SACRIFICE_LUCK_MAX,
+  `value ${(666 * rarityValue(8)).toFixed(0)}`,
+);
+const jackpot = engine.sacrificeBoost(1e6);
+check('unrepayable jackpot pins at fully-flat luck', jackpot.mult === engine.SACRIFICE_LUCK_MAX && jackpot.spins === 15);
 
 const negSame = engine.sacrificeBoost(Math.abs(-2 * rarityValue(10)));
 const posSame = engine.sacrificeBoost(2 * rarityValue(10));
 check('negative petals boost like positives (|value|)', negSame.mult === posSame.mult && negSame.spins === posSame.spins);
 
-function fmt(n: number): string {
-  return n.toExponential(2);
-}
-
 console.log(
-  `  info: sacrifice examples — Common Rose x${engine.sacrificeBoost(1).mult.toFixed(3)}/${engine.sacrificeBoost(1).spins}sp, ` +
+  `  info: sacrifice examples — Common Rose x${engine.sacrificeBoost(rarityValue(0)).mult.toFixed(3)}/${engine.sacrificeBoost(rarityValue(0)).spins}sp, ` +
     `Eternal normal x${engine.sacrificeBoost(rarityValue(19)).mult.toFixed(3)}/${engine.sacrificeBoost(rarityValue(19)).spins}sp, ` +
-    `Omega Hexagon x${hex.mult.toFixed(3)}/${hex.spins}sp, ` +
+    `Omega Hexagon x${hex.mult.toExponential(2)}/${hex.spins}sp (pinned), ` +
     `tier-68 normal x${engine.sacrificeBoost(rarityValue(68)).mult.toFixed(3)}/${engine.sacrificeBoost(rarityValue(68)).spins}sp`,
 );
 
