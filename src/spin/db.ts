@@ -252,6 +252,36 @@ export function resetEconomy(): number {
   }
 }
 
+/** Rewrites every player's total worth by revaluing the petals they currently
+ *  own under the live value curve (used after balance retunes). History
+ *  dependent pulls (Shiny Cash, serum bonuses) are revalued against the
+ *  player's current highest tier with no serum. Returns players updated. */
+export function recalculateEconomy(
+  valueOf: (petal: string, tier: number, highestTier: number) => number,
+): number {
+  db.exec('BEGIN');
+  try {
+    const users = db
+      .prepare('SELECT user_id, highest_tier FROM spin_users')
+      .all() as Array<Record<string, unknown>>;
+    const setTotalStmt = db.prepare('UPDATE spin_users SET total_value = ? WHERE user_id = ?');
+    for (const u of users) {
+      const userId = String(u.user_id);
+      const highest = Number(u.highest_tier);
+      let total = 0;
+      for (const s of collectionStmt.all(userId) as Array<Record<string, unknown>>) {
+        total += Number(s.count) * valueOf(String(s.petal), Number(s.tier), highest);
+      }
+      setTotalStmt.run(total, userId);
+    }
+    db.exec('COMMIT');
+    return users.length;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
 /** Dev/admin boost: enqueues a sacrifice-style luck boost with no petal burned
  *  and no worth deducted. */
 export function enqueueDevBoost(userId: string, mult: number, spins: number, nowMs: number): void {

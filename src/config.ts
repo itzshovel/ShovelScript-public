@@ -24,10 +24,11 @@ export const config = {
   // SQLite file for the /spin minigame. On Railway, point this at a mounted
   // volume (e.g. /data/spin.db) so collections survive redeploys.
   spinDbPath: optional('SPIN_DB_PATH', 'data/spin.db'),
-  // /reseteconomy is restricted to this Discord user id.
+  // /economymanagement is restricted to this Discord user id.
   ownerId: optional('OWNER_ID', '1339885336918097944'),
-  // Second verification factor for /reseteconomy: set this to the same value
-  // as the usage worker's ADMIN_KEY wrangler secret. Empty = command disabled.
+  // Second verification factor for the economy reset: set this to the same
+  // value as the usage worker's ADMIN_KEY wrangler secret. Empty disables the
+  // reset action (recalculating totals still works).
   resetSecretKey: optional('RESET_SECRET_KEY', ''),
   github: {
     owner: optional('GITHUB_OWNER', 'itzshovel'),

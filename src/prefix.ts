@@ -1,9 +1,10 @@
 // Chat prefix commands: "!spin", "!sacrifice Blood Rose Omega", … Every slash
-// command except /reseteconomy also works as a plain chat message. The prefix
-// is staff-configurable via /spinconfig (stored in spin_config). A small
-// adapter wraps the Message in the slice of ChatInputCommandInteraction the
-// command modules actually use; replies are always public (never ephemeral)
-// and never ping anyone.
+// command except /economymanagement also works as a plain chat message (that
+// one needs modals, which only interactions can show). The prefix is
+// staff-configurable via /spinconfig (stored in spin_config). A small adapter
+// wraps the Message in the slice of ChatInputCommandInteraction the command
+// modules actually use; replies are always public (never ephemeral) and never
+// ping anyone.
 
 import type {
   ChatInputCommandInteraction,
@@ -256,9 +257,9 @@ export async function handlePrefixMessage(message: Message): Promise<void> {
   const tokens = body.split(/\s+/);
   const name = tokens.shift()!.toLowerCase();
 
-  if (name === 'reseteconomy') {
+  if (name === 'economymanagement') {
     await message.reply({
-      content: '🔒 /reseteconomy only works as a slash command.',
+      content: '🔒 /economymanagement only works as a slash command.',
       allowedMentions: { parse: [], repliedUser: false },
     });
     return;
