@@ -8,7 +8,7 @@
 // - Petal: static specials first (fixed chance, tier-gated, rarest checked
 //   first), then a weighted pick over the pool at weight 1/|mult|.
 // - Value: mult * R, where R follows the tuned piecewise curve in data.ts
-//   (5 at tier 0 up to ~135 at tier 68), except Card 5*R^2, Cash 7.5*R^2 and
+//   (5 at tier 0 up to ~2.39b at tier 68), except Card 5*R^2, Cash 7.5*R^2 and
 //   Shiny Cash 2 * R(highest tier ever) * R^2. Royal Serum triples missiles.
 
 import {

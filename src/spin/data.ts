@@ -52,17 +52,31 @@ export const MISSILE_FAMILY = new Set(['Missile', 'Homing Missile', 'Fire Missil
 /** Base odds ratio between adjacent tiers. */
 export const TIER_RATIO = 1.5;
 
-// Tuned base value curve: compounding early game, linear mid game, compounding
-// late game. Pieces join continuously at tiers 20 and 50.
-const CURVE_MID_START = 5 * Math.pow(1.09, 20); // ≈ 28.02 at tier 20
-const CURVE_END_START = CURVE_MID_START + 1.6 * 30; // ≈ 76.02 at tier 50
+// Tuned base value curve, in three phases: compounding early game, linear mid
+// game, compounding late game. These five constants are the tuning knobs — the
+// pieces join continuously, and the late phase picks up at exactly the mid
+// phase's per-tier gain before compounding on top of it.
+const CURVE_BASE = 5; // value at tier 0
+const CURVE_EARLY_RATE = 1.64; // per-tier growth over tiers 0-20
+const CURVE_MID_SLOPE = 800_000; // flat gain per tier over tiers 21-50
+const CURVE_LATE_RATE = 1.5; // per-tier compounding over tiers 51-68
+const CURVE_EARLY_END = 20;
+const CURVE_MID_END = 50;
 
-/** Base value of a rarity tier along the tuned curve: 5 at tier 0, ~28 at
- *  tier 20, ~76 at tier 50, ~135 at tier 68. Odds stay on the 1.5x ladder. */
+const CURVE_AT_EARLY_END = CURVE_BASE * Math.pow(CURVE_EARLY_RATE, CURVE_EARLY_END); // ≈ 99.1k
+const CURVE_AT_MID_END =
+  CURVE_AT_EARLY_END + CURVE_MID_SLOPE * (CURVE_MID_END - CURVE_EARLY_END); // ≈ 24.1m
+
+/** Base value of a rarity tier along the tuned curve: 5 at tier 0, ~99k at
+ *  tier 20, ~24.1m at tier 50, ~2.39b at tier 68. Odds stay on the 1.5x
+ *  ladder — this only scales what a pull is worth. */
 export function rarityValue(tier: number): number {
-  if (tier <= 20) return 5 * Math.pow(1.09, tier);
-  if (tier <= 50) return CURVE_MID_START + 1.6 * (tier - 20);
-  return CURVE_END_START + (1.5 * (Math.pow(1.085, tier - 50) - 1)) / 0.085;
+  if (tier <= CURVE_EARLY_END) return CURVE_BASE * Math.pow(CURVE_EARLY_RATE, tier);
+  if (tier <= CURVE_MID_END) return CURVE_AT_EARLY_END + CURVE_MID_SLOPE * (tier - CURVE_EARLY_END);
+  return (
+    CURVE_AT_MID_END +
+    (CURVE_MID_SLOPE * (Math.pow(CURVE_LATE_RATE, tier - CURVE_MID_END) - 1)) / (CURVE_LATE_RATE - 1)
+  );
 }
 
 /** Pool roll weight: 1 / |mult|, with Clover's luck value standing in for its mult. */

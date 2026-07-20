@@ -13,6 +13,7 @@ import {
   rarityValue,
 } from '../src/spin/data.js';
 import * as engine from '../src/spin/engine.js';
+import { fmtValue } from '../src/spin/format.js';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ''): void {
@@ -163,49 +164,60 @@ check('Token one-shot 2-5x', token.newEffects[0].expiresMs === -1 && token.newEf
 
 // --- sacrifice system ------------------------------------------------------
 const evBase = engine.expectedValuePerSpin(1);
-check('EV(1) positive and sane', evBase > 5 && evBase < 100, evBase.toFixed(2));
+check('EV(1) positive and sane', evBase > 50 && evBase < 1000, evBase.toFixed(2));
 check('EV monotone in luck', engine.expectedValuePerSpin(2) > evBase && engine.expectedValuePerSpin(5) > engine.expectedValuePerSpin(2));
 
 const tiny = engine.sacrificeBoost(1);
-check('tiny sacrifice: 3 spins, small mult', tiny.spins === 3 && tiny.mult >= 1 && tiny.mult < 3, `x${tiny.mult.toFixed(4)}`);
+check('tiny sacrifice: 3 spins, ~1x luck', tiny.spins === 3 && tiny.mult >= 1 && tiny.mult < 1.5, `x${tiny.mult.toFixed(4)}`);
 
-const mid = engine.sacrificeBoost(200);
-const midRepaid = (engine.expectedValuePerSpin(mid.mult) - evBase) * mid.spins;
-check(
-  'mid sacrifice repays ~80% of 200',
-  Math.abs(midRepaid - 0.8 * 200) / (0.8 * 200) < 0.01,
-  `x${mid.mult.toFixed(3)} for ${mid.spins} spins repays ${midRepaid.toFixed(1)}`,
-);
+/** Fraction of `value` the solved boost actually pays back over its spins. */
+function repaidFraction(value: number): { frac: number; mult: number; spins: number } {
+  const b = engine.sacrificeBoost(value);
+  return { frac: ((engine.expectedValuePerSpin(b.mult) - evBase) * b.spins) / value, ...b };
+}
 
-const t68 = engine.sacrificeBoost(rarityValue(68));
-const t68Repaid = (engine.expectedValuePerSpin(t68.mult) - evBase) * t68.spins;
-check(
-  'tier-68 normal sacrifice repays ~80%',
-  Math.abs(t68Repaid - 0.8 * rarityValue(68)) / (0.8 * rarityValue(68)) < 0.01,
-  `x${t68.mult.toFixed(3)} for ${t68.spins} spins`,
-);
+// Everything from a common petal up to a top-tier pull now solves exactly —
+// the steeper curve gives flat odds enough headroom to repay these.
+for (const [label, value] of [
+  ['tier 10 normal', rarityValue(10)],
+  ['tier 20 normal (~99k)', rarityValue(20)],
+  ['tier 50 normal', rarityValue(50)],
+  ['tier 68 normal', rarityValue(68)],
+  ['Omega Hexagon', 666 * rarityValue(gates.omega)],
+] as Array<[string, number]>) {
+  const r = repaidFraction(value);
+  check(
+    `${label} sacrifice repays ~80%`,
+    Math.abs(r.frac - engine.SACRIFICE_REDIST) < 0.01,
+    `x${r.mult.toExponential(2)} for ${r.spins} spins repays ${(r.frac * 100).toFixed(1)}%`,
+  );
+}
 
-// The curve compresses top values, so even flat odds can only return so much
-// per spin: values beyond that ceiling (high-mult petals, Card/Cash jackpots)
-// pin at fully-flat odds instead of solving.
-const hex = engine.sacrificeBoost(666 * rarityValue(8));
+// Card/Cash/Shiny Cash jackpots square and cube the curve, so their values
+// still outrun what even fully-flat odds return over a boost window.
+const jackpotValue = engine.computeValue(shinyCash, 68, 68, false);
+const jackpot = engine.sacrificeBoost(jackpotValue);
 check(
-  'Omega Hexagon (beyond flat-odds ceiling) pins at fully-flat luck',
-  hex.mult === engine.SACRIFICE_LUCK_MAX,
-  `value ${(666 * rarityValue(8)).toFixed(0)}`,
+  'unrepayable jackpot pins at fully-flat luck',
+  jackpot.mult === engine.SACRIFICE_LUCK_MAX && jackpot.spins === 25,
+  `value ${jackpotValue.toExponential(2)}`,
 );
-const jackpot = engine.sacrificeBoost(1e6);
-check('unrepayable jackpot pins at fully-flat luck', jackpot.mult === engine.SACRIFICE_LUCK_MAX && jackpot.spins === 15);
 
 const negSame = engine.sacrificeBoost(Math.abs(-2 * rarityValue(10)));
 const posSame = engine.sacrificeBoost(2 * rarityValue(10));
 check('negative petals boost like positives (|value|)', negSame.mult === posSame.mult && negSame.spins === posSame.spins);
 
+const ex = (v: number) => {
+  const b = engine.sacrificeBoost(v);
+  return `x${b.mult.toExponential(2)}/${b.spins}sp`;
+};
 console.log(
-  `  info: sacrifice examples — Common Rose x${engine.sacrificeBoost(rarityValue(0)).mult.toFixed(3)}/${engine.sacrificeBoost(rarityValue(0)).spins}sp, ` +
-    `Eternal normal x${engine.sacrificeBoost(rarityValue(19)).mult.toFixed(3)}/${engine.sacrificeBoost(rarityValue(19)).spins}sp, ` +
-    `Omega Hexagon x${hex.mult.toExponential(2)}/${hex.spins}sp (pinned), ` +
-    `tier-68 normal x${engine.sacrificeBoost(rarityValue(68)).mult.toFixed(3)}/${engine.sacrificeBoost(rarityValue(68)).spins}sp`,
+  '  info: value curve — ' +
+    [0, 20, 21, 50, 68].map((t) => `tier ${t} ${fmtValue(rarityValue(t))}`).join(', '),
+);
+console.log(
+  `  info: sacrifice examples — Common Rose ${ex(rarityValue(0))}, Eternal normal ${ex(rarityValue(19))}, ` +
+    `Omega Hexagon ${ex(666 * rarityValue(gates.omega))}, tier-68 normal ${ex(rarityValue(68))}`,
 );
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} CHECK(S) FAILED`);
