@@ -52,3 +52,5 @@ that's expected and harmless for a worker process.
 
 Bot invite scopes: `bot` + `applications.commands`. Permissions: Send Messages,
 Embed Links, Attach Files, and **Manage Messages** (for `/setup` pinning).
+
+Claude was used to generate this README. No actual code was touched.
