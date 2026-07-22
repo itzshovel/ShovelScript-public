@@ -150,6 +150,7 @@ const consumeSacrificeStmt = db.prepare(
   'UPDATE spin_sacrifices SET spins_left = spins_left - 1 WHERE id = ?',
 );
 const clearSacrificesStmt = db.prepare('DELETE FROM spin_sacrifices WHERE spins_left > 0');
+const removeBoostStmt = db.prepare('DELETE FROM spin_sacrifices WHERE id = ? AND spins_left > 0');
 const getCfgStmt = db.prepare('SELECT value FROM spin_config WHERE key = ?');
 const setCfgStmt = db.prepare(
   'INSERT INTO spin_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
@@ -371,6 +372,11 @@ export function enqueueBoost(p: {
 /** Luck-only admin boost (floor_tier = -1). Thin wrapper over enqueueBoost. */
 export function enqueueDevBoost(userId: string, mult: number, spins: number, nowMs: number): void {
   enqueueBoost({ userId, mult, spins, floorTier: -1, floorUpgrade: 0, nowMs });
+}
+
+/** Removes a single active/queued boost by id. True if one was removed. */
+export function removeBoost(id: number): boolean {
+  return Number(removeBoostStmt.run(id).changes) > 0;
 }
 
 /** Removes every active and queued sacrifice boost. Returns how many. */

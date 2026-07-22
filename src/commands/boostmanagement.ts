@@ -9,7 +9,8 @@
 //   • Add luck boost  — a luck-only boost for N spins (the old /devsacrifice).
 //   • Add floor boost — a free sacrifice-style boost from a chosen value, with
 //     its floor and value-scaled multiplier.
-//   • Clear boosts    — wipe the active and queued sacrifice boosts.
+//   • Pick a boost from the menu, then Remove boost — drop that one boost.
+//   • Clear boosts    — wipe the whole active and queued sacrifice queue.
 // Everything applies immediately. Admin only.
 
 import {
@@ -21,6 +22,8 @@ import {
   ModalBuilder,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
   TextInputBuilder,
   TextInputStyle,
   UserSelectMenuBuilder,
@@ -76,6 +79,54 @@ function panelEmbed(targetId: string | null, nowMs: number): EmbedBuilder {
       { name: 'Server boosts', value: `${activeLine}${queuedLine}` },
     )
     .setFooter({ text: 'Effects need a target. Server boosts apply to everyone. Menu expires after 5 minutes.' });
+}
+
+/** Rebuilds the whole component set. The global-boost picker is regenerated
+ *  from the live queue on every render, so it always reflects the current
+ *  boosts; `selectedBoostId` stays highlighted if it is still there. */
+function buildComponents(sid: string, selectedBoostId: number | null) {
+  const userRow = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+    new UserSelectMenuBuilder().setCustomId(`boost:user:${sid}`).setPlaceholder('Pick a player for effect actions…'),
+  );
+  const effectRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`boost:grant:${sid}`).setLabel('Grant effect').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`boost:cleareff:${sid}`).setLabel('Clear effects').setStyle(ButtonStyle.Secondary),
+  );
+
+  const queue = db.getSacrificeQueue();
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`boost:pick:${sid}`)
+    .setPlaceholder('Pick a global boost to manage…');
+  if (queue.length === 0) {
+    select
+      .setDisabled(true)
+      .addOptions(new StringSelectMenuOptionBuilder().setLabel('No boosts in the queue').setValue('none'));
+  } else {
+    select.addOptions(
+      queue.slice(0, 25).map((b, i) => {
+        const kind =
+          b.floorTier >= 0
+            ? `Floor ${rarities[b.floorTier].name}+ x${fmtMult(b.mult)}`
+            : `Luck x${fmtMult(b.mult)}`;
+        const opt = new StringSelectMenuOptionBuilder()
+          .setLabel(`${i === 0 ? '▶ ' : `#${i + 1} `}${kind}`.slice(0, 100))
+          .setDescription(`${b.spinsLeft} spins left${i === 0 ? ' · active now' : ''}`.slice(0, 100))
+          .setValue(String(b.id));
+        if (selectedBoostId === b.id) opt.setDefault(true);
+        return opt;
+      }),
+    );
+  }
+  const boostRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+
+  const sacRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`boost:luck:${sid}`).setLabel('Add luck boost').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`boost:floor:${sid}`).setLabel('Add floor boost').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`boost:remove:${sid}`).setLabel('Remove boost').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`boost:clearsacs:${sid}`).setLabel('Clear boosts').setStyle(ButtonStyle.Danger),
+  );
+
+  return [userRow, effectRow, boostRow, sacRow];
 }
 
 function textModal(
@@ -139,29 +190,19 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   const sid = interaction.id;
   let targetId: string | null = null;
-
-  const userRow = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
-    new UserSelectMenuBuilder().setCustomId(`boost:user:${sid}`).setPlaceholder('Pick a player for effect actions…'),
-  );
-  const effectRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`boost:grant:${sid}`).setLabel('Grant effect').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`boost:cleareff:${sid}`).setLabel('Clear effects').setStyle(ButtonStyle.Secondary),
-  );
-  const sacRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`boost:luck:${sid}`).setLabel('Add luck boost').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`boost:floor:${sid}`).setLabel('Add floor boost').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`boost:clearsacs:${sid}`).setLabel('Clear boosts').setStyle(ButtonStyle.Danger),
-  );
+  let selectedBoostId: number | null = null;
 
   await interaction.reply({
     embeds: [panelEmbed(null, Date.now())],
-    components: [userRow, effectRow, sacRow],
+    components: buildComponents(sid, selectedBoostId),
     flags: MessageFlags.Ephemeral,
   });
   const message = await interaction.fetchReply();
 
   const refresh = () =>
-    interaction.editReply({ embeds: [panelEmbed(targetId, Date.now())] }).catch(() => {});
+    interaction
+      .editReply({ embeds: [panelEmbed(targetId, Date.now())], components: buildComponents(sid, selectedBoostId) })
+      .catch(() => {});
 
   const collector = message.createMessageComponentCollector({
     time: 300_000,
@@ -172,7 +213,19 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     void (async () => {
       if (component.isUserSelectMenu()) {
         targetId = component.values[0];
-        await component.update({ embeds: [panelEmbed(targetId, Date.now())] });
+        await component.update({
+          embeds: [panelEmbed(targetId, Date.now())],
+          components: buildComponents(sid, selectedBoostId),
+        });
+        return;
+      }
+      if (component.isStringSelectMenu()) {
+        const picked = component.values[0];
+        selectedBoostId = picked === 'none' ? null : Number(picked);
+        await component.update({
+          embeds: [panelEmbed(targetId, Date.now())],
+          components: buildComponents(sid, selectedBoostId),
+        });
         return;
       }
       if (!component.isButton()) return;
@@ -275,8 +328,24 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         return;
       }
 
+      if (action === 'remove') {
+        if (selectedBoostId == null) {
+          await btn.reply({ content: 'Pick a boost from the menu first.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+        const removed = db.removeBoost(selectedBoostId);
+        selectedBoostId = null;
+        await btn.reply({
+          content: removed ? '✅ Removed that boost from the queue.' : 'That boost is already gone.',
+          flags: MessageFlags.Ephemeral,
+        });
+        await refresh();
+        return;
+      }
+
       if (action === 'clearsacs') {
         const cleared = db.clearSacrificeQueue();
+        selectedBoostId = null;
         await btn.reply({
           content: `✅ Cleared ${cleared} active/queued boost${cleared === 1 ? '' : 's'}.`,
           flags: MessageFlags.Ephemeral,
