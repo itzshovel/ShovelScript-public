@@ -22,6 +22,7 @@ import {
 } from '../spin/data.js';
 import * as db from '../spin/db.js';
 import * as engine from '../spin/engine.js';
+import { flairBanner, flairFor, flairTitle, oddsText, recordLines } from '../spin/flair.js';
 import { fmtSigned, fmtValue } from '../spin/format.js';
 
 export const data = new SlashCommandBuilder()
@@ -89,19 +90,31 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   const rarity = rarities[tier];
   const name = displayName(petal, tier);
-  const flair = tier >= db.getFlairTier();
+  // Full flair visuals so staff can preview them, but no ping and no suspense
+  // pause — a fake pull must never notify the role or stall the tester.
+  const style = flairFor(tier, db.getFlairTiers());
+  const flair = style.level > 0;
+
+  const banner = flairBanner(style.level, rarity.name);
+  const body = [
+    ...(banner ? [banner] : []),
+    `${interaction.user} spun a **${rarity.name}** **${name}**` + (value < 0 ? ' … ouch.' : '!'),
+    ...recordLines(tier, user.highestTier, db.getServerHighestTier()),
+  ];
 
   const embed = new EmbedBuilder()
     .setColor(rarityColor(tier))
-    .setTitle(flair ? `🎉 BIG PULL — ${rarity.name} ${name}!` : `${rarity.name} ${name}`)
-    .setDescription(
-      `${interaction.user} spun a **${rarity.name}** **${name}**` + (value < 0 ? ' … ouch.' : '!'),
-    )
+    .setTitle(flairTitle(style.level, rarity.name, name))
+    .setDescription(body.join('\n'))
     .addFields(
       { name: 'Value', value: fmtSigned(value), inline: true },
       { name: 'Total (unchanged)', value: fmtValue(user.totalValue), inline: true },
     )
-    .setFooter({ text: `🧪 TEST SPIN — nothing recorded • Tier ${tier + 1}/${rarities.length}` });
+    .setFooter({
+      text:
+        `🧪 TEST SPIN — nothing recorded • Tier ${tier + 1}/${rarities.length}` +
+        (flair ? ` • ${oddsText(tier, db.getWeightOverrides())}` : ''),
+    });
 
   if (serum && MISSILE_FAMILY.has(petal.name)) {
     embed.addFields({ name: 'Serum', value: '🧪 3x missile bonus applied', inline: true });
@@ -129,4 +142,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     allowedMentions: { parse: [] },
     ...(isPublic ? {} : { flags: MessageFlags.Ephemeral }),
   });
+
+  // Reactions only work on a real message — an ephemeral reply cannot hold them.
+  if (isPublic && style.reactions.length > 0) {
+    const sent = await interaction.fetchReply().catch(() => null);
+    if (sent) {
+      for (const emoji of style.reactions) await sent.react(emoji).catch(() => {});
+    }
+  }
 }

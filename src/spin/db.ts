@@ -6,7 +6,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { config } from '../config.js';
-import { gates } from './data.js';
+import { gates, rarities } from './data.js';
 
 const dbPath = resolve(config.spinDbPath);
 mkdirSync(dirname(dbPath), { recursive: true });
@@ -96,6 +96,7 @@ export interface CollectionRow {
 }
 
 const getUserStmt = db.prepare('SELECT * FROM spin_users WHERE user_id = ?');
+const serverHighestStmt = db.prepare('SELECT MAX(highest_tier) AS t FROM spin_users');
 const upsertUserStmt = db.prepare(`
   INSERT INTO spin_users (user_id, total_value, highest_tier, spin_count, last_spin_ms, stunned_until_ms)
   VALUES (?, ?, ?, 1, ?, ?)
@@ -164,6 +165,13 @@ function rowToUser(userId: string, row: Record<string, unknown> | undefined): Sp
 
 export function getUser(userId: string): SpinUser {
   return rowToUser(userId, getUserStmt.get(userId) as Record<string, unknown> | undefined);
+}
+
+/** Deepest tier anyone in the server has ever pulled; -1 if nobody has spun.
+ *  Read this before recordSpin — that call raises the roller's highest_tier. */
+export function getServerHighestTier(): number {
+  const row = serverHighestStmt.get() as { t: number | null } | undefined;
+  return row?.t ?? -1;
 }
 
 export function getEffects(userId: string): EffectRow[] {
@@ -377,13 +385,31 @@ export function setCooldownMs(ms: number): void {
   setCfgStmt.run('cooldown_ms', String(Math.round(ms)));
 }
 
-export function getFlairTier(): number {
-  const v = Number(cfgGet('flair_tier'));
-  return Number.isInteger(v) && v >= 0 ? v : gates.omega;
+// Flair thresholds, lowest first. flair_tier keeps its original meaning as the
+// entry level, so a server that already tuned it is untouched by the upgrade.
+const FLAIR_KEYS = ['flair_tier', 'flair_tier_2', 'flair_tier_3'] as const;
+const FLAIR_DEFAULTS = [gates.omega, gates.eternal, 30] as const; // Omega, Eternal, Prismatic
+
+/** The three big-pull flair thresholds: [big, huge, insane]. */
+export function getFlairTiers(): number[] {
+  return FLAIR_KEYS.map((key, i) => {
+    const v = Number(cfgGet(key));
+    return Number.isInteger(v) && v >= 0 && v < rarities.length ? v : FLAIR_DEFAULTS[i];
+  });
 }
 
-export function setFlairTier(tier: number): void {
-  setCfgStmt.run('flair_tier', String(tier));
+export function setFlairTiers(tiers: readonly number[]): void {
+  FLAIR_KEYS.forEach((key, i) => setCfgStmt.run(key, String(tiers[i])));
+}
+
+/** Role pinged on top-level flair pulls; null = pings off (the default). */
+export function getFlairPingRole(): string | null {
+  const v = cfgGet('flair_ping_role');
+  return v ? v : null;
+}
+
+export function setFlairPingRole(roleId: string | null): void {
+  setCfgStmt.run('flair_ping_role', roleId ?? '');
 }
 
 /** Channel /spin is locked to; null = usable anywhere. */

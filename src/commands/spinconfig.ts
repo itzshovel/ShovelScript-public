@@ -12,6 +12,7 @@ import {
   GuildMemberRoleManager,
   MessageFlags,
   ModalBuilder,
+  RoleSelectMenuBuilder,
   SlashCommandBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -44,16 +45,30 @@ function configEmbed(): EmbedBuilder {
         .map(([tier, mult]) => `${rarities[Number(tier)]?.name ?? `Tier ${tier}`} ×${mult}`)
         .join(', ')
     : 'none (default 1.5x curve)';
-  const flair = db.getFlairTier();
+  const [big, huge, insane] = db.getFlairTiers();
+  const tierName = (t: number): string => `${rarities[t]?.name ?? '?'} (${t})`;
+  const pingRole = db.getFlairPingRole();
   const channelId = db.getSpinChannelId();
   return new EmbedBuilder()
     .setColor(0x9b59b6)
     .setTitle('⚙️ Spin config')
     .addFields(
       { name: 'Cooldown', value: fmtDuration(db.getCooldownMs()), inline: true },
-      { name: 'Flair from', value: `${rarities[flair]?.name ?? '?'} (tier ${flair})`, inline: true },
       { name: 'Spin channel', value: channelId ? `<#${channelId}>` : 'anywhere', inline: true },
       { name: 'Chat prefix', value: `\`${db.getPrefix()}\``, inline: true },
+      {
+        name: 'Flair tiers',
+        value:
+          `🎉 Big — ${tierName(big)}\n` +
+          `🔥 Huge — ${tierName(huge)}\n` +
+          `🌌 Insane — ${tierName(insane)}`,
+        inline: true,
+      },
+      {
+        name: 'Flair ping',
+        value: pingRole ? `<@&${pingRole}> on Insane` : 'off',
+        inline: true,
+      },
       { name: 'Odds overrides', value: overrideText },
     )
     .setFooter({ text: 'Buttons below edit values. Menu expires after 5 minutes.' });
@@ -62,20 +77,18 @@ function configEmbed(): EmbedBuilder {
 function textModal(
   id: string,
   title: string,
-  inputs: Array<{ id: string; label: string; placeholder: string }>,
+  inputs: Array<{ id: string; label: string; placeholder: string; value?: string }>,
 ): ModalBuilder {
   const modal = new ModalBuilder().setCustomId(id).setTitle(title);
   for (const input of inputs) {
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder()
-          .setCustomId(input.id)
-          .setLabel(input.label)
-          .setPlaceholder(input.placeholder)
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true),
-      ),
-    );
+    const field = new TextInputBuilder()
+      .setCustomId(input.id)
+      .setLabel(input.label)
+      .setPlaceholder(input.placeholder)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+    if (input.value !== undefined) field.setValue(input.value);
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(field));
   }
   return modal;
 }
@@ -121,13 +134,17 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const sid = interaction.id;
   const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`spincfg:cd:${sid}`).setLabel('Cooldown').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`spincfg:flair:${sid}`).setLabel('Flair tier').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`spincfg:flair:${sid}`).setLabel('Flair tiers').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`spincfg:weight:${sid}`).setLabel('Tier weight').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`spincfg:reset:${sid}`).setLabel('Reset weights').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`spincfg:unlock:${sid}`).setLabel('Unlock channel').setStyle(ButtonStyle.Secondary),
   );
   const prefixRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`spincfg:prefix:${sid}`).setLabel('Chat prefix').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`spincfg:pingoff:${sid}`)
+      .setLabel('Clear flair ping')
+      .setStyle(ButtonStyle.Secondary),
   );
   const channelRow = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
     new ChannelSelectMenuBuilder()
@@ -135,10 +152,15 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       .setPlaceholder('Lock /spin to a channel…')
       .setChannelTypes(ChannelType.GuildText),
   );
+  const pingRow = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
+    new RoleSelectMenuBuilder()
+      .setCustomId(`spincfg:ping:${sid}`)
+      .setPlaceholder('Ping this role on Insane pulls…'),
+  );
 
   await interaction.reply({
     embeds: [configEmbed()],
-    components: [buttonRow, prefixRow, channelRow],
+    components: [buttonRow, prefixRow, channelRow, pingRow],
     flags: MessageFlags.Ephemeral,
   });
   const message = await interaction.fetchReply();
@@ -152,6 +174,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     void (async () => {
       if (component.isChannelSelectMenu()) {
         db.setSpinChannelId(component.values[0]);
+        await component.update({ embeds: [configEmbed()] });
+        return;
+      }
+      if (component.isRoleSelectMenu()) {
+        db.setFlairPingRole(component.values[0]);
         await component.update({ embeds: [configEmbed()] });
         return;
       }
@@ -186,18 +213,34 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
           },
         );
       } else if (action === 'flair') {
+        const current = db.getFlairTiers();
         await handleModal(
           btn,
-          textModal(`spincfg:flairm:${sid}`, 'Big-pull flair tier', [
-            { id: 'value', label: 'Rarity name or tier index', placeholder: 'Omega' },
+          textModal(`spincfg:flairm:${sid}`, 'Big-pull flair tiers', [
+            { id: 'big', label: '🎉 Big pull from', placeholder: 'Omega', value: rarities[current[0]]?.name },
+            { id: 'huge', label: '🔥 Huge pull from', placeholder: 'Eternal', value: rarities[current[1]]?.name },
+            { id: 'insane', label: '🌌 Insane pull from', placeholder: 'Prismatic', value: rarities[current[2]]?.name },
           ]),
           (submit) => {
-            const tier = findTier(submit.fields.getTextInputValue('value'));
-            if (tier < 0) throw new Error('Unknown rarity. Use a name like "Omega" or an index 0-68.');
-            db.setFlairTier(tier);
-            return `✅ Big-pull flair now starts at ${rarities[tier].name}.`;
+            const labels = ['Big', 'Huge', 'Insane'];
+            const tiers = ['big', 'huge', 'insane'].map((id, i) => {
+              const tier = findTier(submit.fields.getTextInputValue(id));
+              if (tier < 0) {
+                throw new Error(`Unknown rarity for ${labels[i]}. Use a name like "Omega" or an index 0-68.`);
+              }
+              return tier;
+            });
+            if (tiers[1] <= tiers[0] || tiers[2] <= tiers[1]) {
+              throw new Error('Each level must be rarer than the one below it.');
+            }
+            db.setFlairTiers(tiers);
+            return `✅ Flair now starts at ${tiers.map((t, i) => `${labels[i]} ${rarities[t].name}`).join(', ')}.`;
           },
         );
+      } else if (action === 'pingoff') {
+        db.setFlairPingRole(null);
+        await btn.update({ embeds: [configEmbed()] });
+        return;
       } else if (action === 'weight') {
         await handleModal(
           btn,

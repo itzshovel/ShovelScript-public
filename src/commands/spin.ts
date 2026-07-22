@@ -10,7 +10,17 @@ import {
 import { displayName, MISSILE_FAMILY, petalImage, rarities, rarityColor } from '../spin/data.js';
 import * as db from '../spin/db.js';
 import * as engine from '../spin/engine.js';
+import {
+  flairBanner,
+  flairFor,
+  flairTitle,
+  oddsText,
+  recordLines,
+  type FlairStyle,
+} from '../spin/flair.js';
 import { fmtMult, fmtSigned, fmtValue } from '../spin/format.js';
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const data = new SlashCommandBuilder()
   .setName('spin')
@@ -71,6 +81,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     floorNote = `🩸 Sacrifice floor: ${rarities[boost.floorTier].name}+ (${boost.spinsLeft} left)`;
   }
   const petal = engine.pickPetal(tier, rng);
+  // Read before recordSpin — that call raises this roller's highest_tier, which
+  // would otherwise swallow the record they just set.
+  const serverBest = db.getServerHighestTier();
   const serum = engine.serumActive(effects, now);
   const value = engine.computeValue(petal, tier, Math.max(user.highestTier, tier), serum);
   const outcome = engine.resolveEffect(petal, now, rng);
@@ -89,21 +102,30 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   const rarity = rarities[tier];
   const name = displayName(petal, tier);
-  const flair = tier >= db.getFlairTier();
+  const style = flairFor(tier, db.getFlairTiers());
+  const flair = style.level > 0;
   const newTotal = user.totalValue + value;
+
+  const banner = flairBanner(style.level, rarity.name);
+  const body = [
+    ...(banner ? [banner] : []),
+    `${interaction.user} spun a **${rarity.name}** **${name}**` + (value < 0 ? ' … ouch.' : '!'),
+    ...recordLines(tier, user.highestTier, serverBest),
+  ];
 
   const embed = new EmbedBuilder()
     .setColor(rarityColor(tier))
-    .setTitle(flair ? `🎉 BIG PULL — ${rarity.name} ${name}!` : `${rarity.name} ${name}`)
-    .setDescription(
-      `${interaction.user} spun a **${rarity.name}** **${name}**` +
-        (value < 0 ? ' … ouch.' : '!'),
-    )
+    .setTitle(flairTitle(style.level, rarity.name, name))
+    .setDescription(body.join('\n'))
     .addFields(
       { name: 'Value', value: fmtSigned(value), inline: true },
       { name: 'Total', value: fmtValue(newTotal), inline: true },
     )
-    .setFooter({ text: `Tier ${tier + 1}/${rarities.length} • Spin #${user.spinCount + 1}` });
+    .setFooter({
+      text:
+        `Tier ${tier + 1}/${rarities.length} • Spin #${user.spinCount + 1}` +
+        (flair ? ` • ${oddsText(tier, db.getWeightOverrides())}` : ''),
+    });
 
   if (luck !== 1) {
     embed.addFields({ name: 'Luck', value: `x${fmtMult(luck)} (${parts.join(', ')})`, inline: true });
@@ -122,5 +144,41 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   if (flair) embed.setImage('attachment://petal.png');
   else embed.setThumbnail('attachment://petal.png');
 
-  await interaction.reply({ embeds: [embed], files: [image], allowedMentions: { parse: [] } });
+  const result = { embeds: [embed], files: [image], allowedMentions: { parse: [] } };
+  if (style.delayMs > 0) {
+    // Suspense reveal. The roll is already settled and recorded, so the pause
+    // only delays the message — it cannot change the outcome or the cooldown.
+    await interaction.reply({ content: '🎰 Rolling…', allowedMentions: { parse: [] } });
+    await sleep(style.delayMs);
+    await interaction.editReply({ content: null, ...result });
+  } else {
+    await interaction.reply(result);
+  }
+
+  await celebrate(interaction, style, `${interaction.user} just pulled a **${rarity.name}** **${name}**!`);
+}
+
+/** Ping first (the notification is the point), then decorate with reactions.
+ *  The ping is a separate message rather than part of the revealed embed:
+ *  Discord does not reliably notify for mentions introduced by an edit. Both
+ *  steps are best-effort — a missing permission must not fail the spin. */
+async function celebrate(
+  interaction: ChatInputCommandInteraction,
+  style: FlairStyle,
+  announcement: string,
+): Promise<void> {
+  if (style.ping) {
+    const roleId = db.getFlairPingRole();
+    if (roleId) {
+      await interaction
+        .followUp({ content: `<@&${roleId}> ${announcement}`, allowedMentions: { roles: [roleId] } })
+        .catch(() => {});
+    }
+  }
+  if (style.reactions.length === 0) return;
+  const sent = await interaction.fetchReply().catch(() => null);
+  if (!sent) return;
+  for (const emoji of style.reactions) {
+    await sent.react(emoji).catch(() => {});
+  }
 }
