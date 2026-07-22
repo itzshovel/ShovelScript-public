@@ -168,48 +168,75 @@ check('EV(1) positive and sane', evBase > 50 && evBase < 1000, evBase.toFixed(2)
 check('EV monotone in luck', engine.expectedValuePerSpin(2) > evBase && engine.expectedValuePerSpin(5) > engine.expectedValuePerSpin(2));
 
 const tiny = engine.sacrificeBoost(1);
-check('tiny sacrifice: 3 spins, ~1x luck', tiny.spins === 3 && tiny.mult >= 1 && tiny.mult < 1.5, `x${tiny.mult.toFixed(4)}`);
+check('tiny sacrifice: 3 spins, floor at tier 0', tiny.spins === 3 && tiny.floorTier === 0);
 
-/** Fraction of `value` the solved boost actually pays back over its spins. */
-function repaidFraction(value: number): { frac: number; mult: number; spins: number } {
-  const b = engine.sacrificeBoost(value);
-  return { frac: ((engine.expectedValuePerSpin(b.mult) - evBase) * b.spins) / value, ...b };
+// A floored spin lands at max(natural roll, sampled floor), then picks a pool
+// petal — exactly what /spin does. Simulate the boost window and measure how
+// much of the sacrificed value it actually pays back (median, not mean: the
+// median is what a typical player experiences, and the whole point of flooring
+// is that it no longer sits near zero).
+function poolPick(): (typeof poolPetals)[number] {
+  let total = 0;
+  for (const p of poolPetals) total += poolWeight(p);
+  let roll = rng() * total;
+  for (const p of poolPetals) {
+    roll -= poolWeight(p);
+    if (roll < 0) return p;
+  }
+  return poolPetals[poolPetals.length - 1];
+}
+function realizedPayback(value: number, trials = 4000): { mean: number; median: number; p10: number; floorTier: number; spins: number } {
+  const boost = engine.sacrificeBoost(value);
+  const fracs: number[] = [];
+  for (let t = 0; t < trials; t++) {
+    let sum = 0;
+    for (let s = 0; s < boost.spins; s++) {
+      const tier = Math.max(engine.rollTier(1, {}, rng), engine.rollFloorTier(boost, rng));
+      sum += engine.computeValue(poolPick(), tier, rarities.length - 1, false);
+    }
+    fracs.push(sum / value);
+  }
+  fracs.sort((a, b) => a - b);
+  return {
+    mean: fracs.reduce((a, b) => a + b, 0) / trials,
+    median: fracs[trials >> 1],
+    p10: fracs[Math.floor(trials * 0.1)],
+    floorTier: boost.floorTier,
+    spins: boost.spins,
+  };
 }
 
-// Everything from a common petal up to a top-tier pull now solves exactly —
-// the steeper curve gives flat odds enough headroom to repay these.
+// Across the whole meaningful range, the median boost window pays back near
+// 0.8x and even an unlucky (10th-percentile) window returns a solid chunk —
+// never the ~0.01x-0.06x the old luck-multiplier model delivered.
 for (const [label, value] of [
-  ['tier 10 normal', rarityValue(10)],
+  ['tier 15 normal', rarityValue(15)],
   ['tier 20 normal (~99k)', rarityValue(20)],
+  ['tier 25 normal', rarityValue(25)],
   ['tier 50 normal', rarityValue(50)],
   ['tier 68 normal', rarityValue(68)],
   ['Omega Hexagon', 666 * rarityValue(gates.omega)],
 ] as Array<[string, number]>) {
-  const r = repaidFraction(value);
+  const r = realizedPayback(value);
   check(
-    `${label} sacrifice repays ~80%`,
-    Math.abs(r.frac - engine.SACRIFICE_REDIST) < 0.01,
-    `x${r.mult.toExponential(2)} for ${r.spins} spins repays ${(r.frac * 100).toFixed(1)}%`,
+    `${label}: median payback near ${engine.SACRIFICE_REDIST}x`,
+    Math.abs(r.median - engine.SACRIFICE_REDIST) < 0.2 && r.p10 > 0.3,
+    `floor ${rarities[r.floorTier].name} • median ${r.median.toFixed(2)}x • p10 ${r.p10.toFixed(2)}x • mean ${r.mean.toFixed(2)}x`,
   );
 }
 
-// Card/Cash/Shiny Cash jackpots square and cube the curve, so their values
-// still outrun what even fully-flat odds return over a boost window.
-const jackpotValue = engine.computeValue(shinyCash, 68, 68, false);
-const jackpot = engine.sacrificeBoost(jackpotValue);
-check(
-  'unrepayable jackpot pins at fully-flat luck',
-  jackpot.mult === engine.SACRIFICE_LUCK_MAX && jackpot.spins === 25,
-  `value ${jackpotValue.toExponential(2)}`,
-);
+// Floors rise monotonically with the sacrificed value, and duration is capped.
+check('bigger sacrifice → higher floor', engine.sacrificeBoost(rarityValue(20)).floorTier < engine.sacrificeBoost(rarityValue(50)).floorTier);
+const jackpot = engine.sacrificeBoost(engine.computeValue(shinyCash, 68, 68, false));
+check('jackpot sacrifice caps at 25 spins and top floor', jackpot.spins === 25 && jackpot.floorTier === rarities.length - 1);
 
 const negSame = engine.sacrificeBoost(Math.abs(-2 * rarityValue(10)));
 const posSame = engine.sacrificeBoost(2 * rarityValue(10));
-check('negative petals boost like positives (|value|)', negSame.mult === posSame.mult && negSame.spins === posSame.spins);
+check('negative petals boost like positives (|value|)', negSame.floorTier === posSame.floorTier && negSame.spins === posSame.spins);
 
 const ex = (v: number) => {
   const b = engine.sacrificeBoost(v);
-  return `x${b.mult.toExponential(2)}/${b.spins}sp`;
+  return `${rarities[b.floorTier].name}+/${b.spins}sp`;
 };
 console.log(
   '  info: value curve — ' +

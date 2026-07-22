@@ -25,7 +25,7 @@ import {
 } from '../spin/data.js';
 import * as db from '../spin/db.js';
 import * as engine from '../spin/engine.js';
-import { fmtMult, fmtValue } from '../spin/format.js';
+import { fmtValue } from '../spin/format.js';
 
 export const data = new SlashCommandBuilder()
   .setName('sacrifice')
@@ -81,7 +81,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   const user = db.getUser(userId);
   const value = engine.computeValue(petal, tier, Math.max(user.highestTier, tier), false);
-  const { mult, spins } = engine.sacrificeBoost(Math.abs(value));
+  const { floorTier, floorUpgrade, spins } = engine.sacrificeBoost(Math.abs(value));
   const name = displayName(petal, tier);
   const queueAhead = db.getSacrificeQueue().length;
 
@@ -96,7 +96,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     .setTitle(`🩸 Sacrifice ${rarities[tier].name} ${name}?`)
     .setDescription(
       `Worth ${fmtValue(value)} (you own ×${owned}). ${worthNote}\n` +
-        `The server gains **x${fmtMult(mult)} luck for ${spins} spins** (anyone's spins).${queueNote}\n\n` +
+        `For the next **${spins} spins server-wide**, every spin is guaranteed to land at ` +
+        `least **${rarities[floorTier].name}** rarity (anyone's spins, often higher).${queueNote}\n\n` +
         `This cannot be undone.`,
     );
 
@@ -135,7 +136,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         petal: petal.name,
         tier,
         value,
-        mult,
+        floorTier,
+        floorUpgrade,
         spins,
         nowMs: Date.now(),
       });
@@ -152,8 +154,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         .setColor(rarityColor(tier))
         .setTitle(`🩸 ${interaction.user.username} sacrificed a ${rarities[tier].name} ${name}!`)
         .setDescription(
-          `Worth ${fmtValue(value)} — the server gains **x${fmtMult(mult)} luck for ${spins} spins**.\n` +
-            (isActive ? 'The boost is **live now** — go spin!' : `Queued: it activates after the current boost${nowQueued.length > 2 ? 'es' : ''} run out.`),
+          `Worth ${fmtValue(value)} — the server's next **${spins} spins** are floored to ` +
+            `**${rarities[floorTier].name}+** rarity.\n` +
+            (isActive ? 'The floor is **live now** — go spin!' : `Queued: it activates after the current boost${nowQueued.length > 2 ? 'es' : ''} run out.`),
         )
         .setThumbnail('attachment://petal.png')
         .setFooter({ text: 'Sacrifice boosts apply to everyone\'s spins' });

@@ -99,21 +99,30 @@ function trim(n: number): string {
  *  a tier's relative likelihood by min(1.5^(i*(1-1/L)), L) — the curve softens
  *  with depth but is CLAMPED so no tier ever becomes more than Lx more likely
  *  than baseline ("x5 luck" = at most 5x the normal odds, deep tiers exactly
- *  5x). Staff overrides multiply on top (0 disables a tier). */
-export function tierWeights(luck: number, overrides: Record<number, number> = {}): number[] {
+ *  5x). Staff overrides multiply on top (0 disables a tier).
+ *
+ *  `flatten` restores the ORIGINAL (retired) luck model: the same softening
+ *  boost without the clamp, so luck bends the whole curve and deep tiers become
+ *  astronomically more likely. Kept only for /simulatespin comparisons. */
+export function tierWeights(luck: number, overrides: Record<number, number> = {}, flatten = false): number[] {
   const L = Math.max(luck, 1);
   const soften = 1 - 1 / L;
   const weights: number[] = [];
   for (let i = 0; i < rarities.length; i++) {
-    const boost = Math.min(Math.pow(TIER_RATIO, i * soften), L);
+    const raw = Math.pow(TIER_RATIO, i * soften);
+    const boost = flatten ? raw : Math.min(raw, L);
     weights.push(Math.pow(TIER_RATIO, -i) * boost * (overrides[i] ?? 1));
   }
   return weights;
 }
 
-/** Roll a rarity tier using the clamped-luck weights. */
-export function rollTier(luck: number, overrides: Record<number, number>, rng: Rng): number {
-  const weights = tierWeights(luck, overrides);
+/** Roll a rarity tier from the luck weights (clamped, or flattened if asked). */
+export function rollTier(luck: number, overrides: Record<number, number>, rng: Rng, flatten = false): number {
+  return sampleTier(tierWeights(luck, overrides, flatten), rng);
+}
+
+/** Weighted index pick over precomputed tier weights. */
+function sampleTier(weights: number[], rng: Rng): number {
   let total = 0;
   for (const w of weights) total += w;
   let roll = rng() * total;
@@ -121,7 +130,7 @@ export function rollTier(luck: number, overrides: Record<number, number>, rng: R
     roll -= weights[i];
     if (roll < 0) return i;
   }
-  return rarities.length - 1;
+  return weights.length - 1;
 }
 
 /** Pick the petal for a rolled tier: gated statics first (rarest first, each an
@@ -232,59 +241,78 @@ export function serumActive(effects: EffectRow[], now: number): boolean {
 
 /** Fraction of a sacrifice's value redistributed back through boosted spins. */
 export const SACRIFICE_REDIST = 0.8;
-/** Luck beyond this adds nothing: the odds are already fully flat (every
- *  tier's clamp at Lx has disengaged). The solver pins here for sacrifices
- *  whose value no amount of luck can repay (jackpot pulls). */
-export const SACRIFICE_LUCK_MAX = Math.pow(TIER_RATIO, rarities.length + 1);
+
+/** Signed mean multiplier of a pool pull (negatives and fractionals included).
+ *  Boost floors are chosen against this so a floored spin's realized value
+ *  averages the per-spin redistribution target. */
+const POOL_MEAN_MULT = (() => {
+  let w = 0;
+  let signed = 0;
+  for (const p of poolPetals) {
+    const pw = poolWeight(p);
+    w += pw;
+    signed += pw * p.mult;
+  }
+  return signed / w;
+})();
 
 /** Expected POOL pull value of one spin at luck L under the clamped model.
- *  Static specials are deliberately excluded: Card/Cash/Shiny Cash's squared
- *  and cubed value formulas ride on tiny fixed chances a boost window almost
- *  never sees, and including them would skew the calibration toward jackpots.
- *  Calibrating against the pool matches what a spin typically pays; the
- *  jackpot tail rides on top as a bonus. */
+ *  Static specials are deliberately excluded (their squared/cubed values ride
+ *  on tiny fixed chances a boost window almost never sees). Kept as a baseline
+ *  reference and for the simulation harness. */
 export function expectedValuePerSpin(luck: number): number {
   const weights = tierWeights(luck);
   let totalW = 0;
   for (const w of weights) totalW += w;
-
-  let poolW = 0;
-  let poolSigned = 0;
-  for (const p of poolPetals) {
-    const w = poolWeight(p);
-    poolW += w;
-    poolSigned += w * p.mult;
-  }
-  const poolMeanMult = poolSigned / poolW;
-
   let ev = 0;
   for (let i = 0; i < rarities.length; i++) {
-    ev += (weights[i] / totalW) * poolMeanMult * rarityValue(i);
+    ev += (weights[i] / totalW) * POOL_MEAN_MULT * rarityValue(i);
   }
   return ev;
 }
 
+export interface SacrificeFloor {
+  /** Guaranteed minimum rarity tier a boosted spin lands on. */
+  floorTier: number;
+  /** Chance (0..1) a boosted spin is floored one tier higher instead — smooths
+   *  the coarse value jumps between adjacent tiers so the mean lands on target. */
+  floorUpgrade: number;
+}
+
+/** Floor that pays out `targetPerSpin` on an average boosted spin. The
+ *  mult-adjusted target is bracketed between two adjacent tiers and upgraded
+ *  probabilistically, so the realized mean hits target despite coarse tier
+ *  steps. */
+export function sacrificeFloor(targetPerSpin: number): SacrificeFloor {
+  const adj = targetPerSpin / POOL_MEAN_MULT;
+  if (adj <= rarityValue(0)) return { floorTier: 0, floorUpgrade: 0 };
+  let f = 0;
+  for (let i = 0; i < rarities.length; i++) {
+    if (rarityValue(i) <= adj) f = i;
+    else break;
+  }
+  if (f >= rarities.length - 1) return { floorTier: f, floorUpgrade: 0 };
+  const lo = rarityValue(f);
+  const hi = rarityValue(f + 1);
+  const floorUpgrade = Math.min(1, Math.max(0, (adj - lo) / (hi - lo)));
+  return { floorTier: f, floorUpgrade };
+}
+
 /** Boost bought by sacrificing |value|: duration scales with log10 of the
- *  value, and the multiplier is solved (uncapped) so the boosted spins' extra
- *  expected value repays SACRIFICE_REDIST of it on average. Sacrifices no
- *  luck can repay (jackpot-grade values above what flat odds return over the
- *  boost window) pin at SACRIFICE_LUCK_MAX (fully flat odds). */
-export function sacrificeBoost(absValue: number): { mult: number; spins: number } {
+ *  value, and boosted spins are FLOORED to a rarity that redistributes
+ *  SACRIFICE_REDIST of the value back reliably — per spin, not merely in
+ *  expectation. (The old luck-multiplier model's mean was carried by rare high
+ *  rolls, so a typical boost window paid back almost nothing.) */
+export function sacrificeBoost(absValue: number): SacrificeFloor & { spins: number } {
   const spins = Math.min(25, Math.max(3, 3 + 2 * Math.floor(Math.log10(1 + absValue))));
   const targetPerSpin = (SACRIFICE_REDIST * absValue) / spins;
-  const base = expectedValuePerSpin(1);
-  if (expectedValuePerSpin(SACRIFICE_LUCK_MAX) - base <= targetPerSpin) {
-    return { mult: SACRIFICE_LUCK_MAX, spins };
-  }
-  let lo = 1;
-  let hi = 2;
-  while (expectedValuePerSpin(hi) - base < targetPerSpin) hi *= 2;
-  for (let iter = 0; iter < 80; iter++) {
-    const mid = (lo + hi) / 2;
-    if (expectedValuePerSpin(mid) - base < targetPerSpin) lo = mid;
-    else hi = mid;
-  }
-  return { mult: (lo + hi) / 2, spins };
+  return { ...sacrificeFloor(targetPerSpin), spins };
+}
+
+/** Concrete floor tier for one boosted spin, sampling the fractional upgrade. */
+export function rollFloorTier(floor: SacrificeFloor, rng: Rng): number {
+  const tier = floor.floorTier + (rng() < floor.floorUpgrade ? 1 : 0);
+  return Math.min(rarities.length - 1, tier);
 }
 
 /** Current tier odds (no luck), for /spinodds: probability per tier. */
@@ -293,4 +321,54 @@ export function tierOdds(overrides: Record<number, number>): number[] {
   let total = 0;
   for (const w of weights) total += w;
   return weights.map((w) => w / total);
+}
+
+// --- simulation (for /simulatespin) ----------------------------------------
+
+export interface SpinSimSummary {
+  count: number;
+  luck: number;
+  flatten: boolean;
+  /** Spins that landed on each tier index. */
+  tierCounts: number[];
+  /** How often each static special (Card, Hexagon, Plastic Egg, …) came up. */
+  specialCounts: Array<{ name: string; count: number }>;
+  totalValue: number;
+  best: { tier: number; petal: string; value: number } | null;
+  highestTier: number;
+}
+
+/** Run `count` full spins (tier roll + petal pick + value) at a fixed luck and
+ *  return an aggregate summary — no DB, no effects, nothing recorded. Weights
+ *  are computed once and reused, so large counts stay cheap. */
+export function simulateSpins(
+  count: number,
+  luck: number,
+  overrides: Record<number, number>,
+  flatten: boolean,
+  rng: Rng,
+): SpinSimSummary {
+  const weights = tierWeights(luck, overrides, flatten);
+  const tierCounts = new Array<number>(rarities.length).fill(0);
+  const specials = new Map<string, number>();
+  let totalValue = 0;
+  let highestTier = -1;
+  let best: { tier: number; petal: string; value: number } | null = null;
+
+  for (let s = 0; s < count; s++) {
+    const tier = sampleTier(weights, rng);
+    const petal = pickPetal(tier, rng);
+    if (tier > highestTier) highestTier = tier;
+    const value = computeValue(petal, tier, highestTier, false);
+    tierCounts[tier]++;
+    totalValue += value;
+    if (petal.static) specials.set(petal.name, (specials.get(petal.name) ?? 0) + 1);
+    if (!best || value > best.value) best = { tier, petal: petal.name, value };
+  }
+
+  const specialCounts = [...specials.entries()]
+    .map(([name, c]) => ({ name, count: c }))
+    .sort((a, b) => b.count - a.count);
+
+  return { count, luck, flatten, tierCounts, specialCounts, totalValue, best, highestTier };
 }

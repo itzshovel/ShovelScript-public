@@ -55,12 +55,21 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   const rng = Math.random;
   const effects = db.getEffects(userId);
-  const sacrifice = db.getSacrificeQueue()[0];
-  const globalBoosts = sacrifice
-    ? [{ label: `Sacrifice x${fmtMult(sacrifice.mult)} (${sacrifice.spinsLeft} left)`, mult: sacrifice.mult }]
-    : [];
+  const boost = db.getSacrificeQueue()[0];
+  // Dev boosts add luck; real (floor-based) sacrifices instead guarantee a
+  // minimum tier — so their redistribution is actually delivered per spin.
+  const globalBoosts =
+    boost && boost.mult > 1
+      ? [{ label: `Boost x${fmtMult(boost.mult)} (${boost.spinsLeft} left)`, mult: boost.mult }]
+      : [];
   const { luck, consumedIds, parts } = engine.computeLuck(effects, now, globalBoosts);
-  const tier = engine.rollTier(luck, db.getWeightOverrides(), rng);
+  let tier = engine.rollTier(luck, db.getWeightOverrides(), rng);
+  let floorNote: string | null = null;
+  if (boost && boost.floorTier >= 0) {
+    const floored = engine.rollFloorTier(boost, rng);
+    if (tier < floored) tier = floored;
+    floorNote = `🩸 Sacrifice floor: ${rarities[boost.floorTier].name}+ (${boost.spinsLeft} left)`;
+  }
   const petal = engine.pickPetal(tier, rng);
   const serum = engine.serumActive(effects, now);
   const value = engine.computeValue(petal, tier, Math.max(user.highestTier, tier), serum);
@@ -75,7 +84,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     stunnedUntilMs: outcome.stunnedUntilMs,
     consumedEffectIds: consumedIds,
     newEffects: outcome.newEffects,
-    consumedSacrificeId: sacrifice?.id ?? null,
+    consumedSacrificeId: boost?.id ?? null,
   });
 
   const rarity = rarities[tier];
@@ -98,6 +107,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   if (luck !== 1) {
     embed.addFields({ name: 'Luck', value: `x${fmtMult(luck)} (${parts.join(', ')})`, inline: true });
+  }
+  if (floorNote) {
+    embed.addFields({ name: 'Sacrifice', value: floorNote, inline: true });
   }
   if (serum && MISSILE_FAMILY.has(petal.name)) {
     embed.addFields({ name: 'Serum', value: '🧪 3x missile bonus applied', inline: true });

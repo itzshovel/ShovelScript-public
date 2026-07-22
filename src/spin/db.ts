@@ -55,6 +55,22 @@ db.exec(`
   );
 `);
 
+// Migration: floor-based sacrifices (replaced the luck-multiplier model). A
+// real sacrifice now floors boosted spins to floor_tier (with floor_upgrade
+// chance of one tier higher); dev boosts keep mult and leave floor_tier = -1.
+const sacCols = db.prepare('PRAGMA table_info(spin_sacrifices)').all() as Array<{ name: string }>;
+if (!sacCols.some((c) => c.name === 'floor_tier')) {
+  db.exec('ALTER TABLE spin_sacrifices ADD COLUMN floor_tier INTEGER NOT NULL DEFAULT -1');
+  // Retire boosts still queued under the old model. Their solved mult ran to
+  // x3.5e11 for a deep sacrifice, and with floor_tier defaulting to -1 the new
+  // spin path would read them as dev luck boosts — flat odds across every tier
+  // for the rest of their window. Runs once, only on a pre-migration database.
+  db.exec('UPDATE spin_sacrifices SET spins_left = 0 WHERE spins_left > 0');
+}
+if (!sacCols.some((c) => c.name === 'floor_upgrade')) {
+  db.exec('ALTER TABLE spin_sacrifices ADD COLUMN floor_upgrade REAL NOT NULL DEFAULT 0');
+}
+
 export interface SpinUser {
   userId: string;
   totalValue: number;
@@ -117,8 +133,8 @@ const deleteEmptyStackStmt = db.prepare(
 );
 const adjustTotalStmt = db.prepare('UPDATE spin_users SET total_value = total_value - ? WHERE user_id = ?');
 const insertSacrificeStmt = db.prepare(`
-  INSERT INTO spin_sacrifices (user_id, petal, tier, value, mult, spins_total, spins_left, created_ms)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO spin_sacrifices (user_id, petal, tier, value, mult, spins_total, spins_left, created_ms, floor_tier, floor_upgrade)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 const sacrificeQueueStmt = db.prepare(
   'SELECT * FROM spin_sacrifices WHERE spins_left > 0 ORDER BY id ASC',
@@ -199,9 +215,14 @@ export interface SacrificeRow {
   petal: string;
   tier: number;
   value: number;
+  /** Luck multiplier for dev boosts; 1 for real (floor-based) sacrifices. */
   mult: number;
   spinsTotal: number;
   spinsLeft: number;
+  /** Guaranteed floor tier for boosted spins; -1 for dev (luck-only) boosts. */
+  floorTier: number;
+  /** Chance a boosted spin floors one tier higher (fractional smoothing). */
+  floorUpgrade: number;
 }
 
 function rowToSacrifice(r: Record<string, unknown>): SacrificeRow {
@@ -214,6 +235,8 @@ function rowToSacrifice(r: Record<string, unknown>): SacrificeRow {
     mult: Number(r.mult),
     spinsTotal: Number(r.spins_total),
     spinsLeft: Number(r.spins_left),
+    floorTier: Number(r.floor_tier),
+    floorUpgrade: Number(r.floor_upgrade),
   };
 }
 
@@ -283,9 +306,9 @@ export function recalculateEconomy(
 }
 
 /** Dev/admin boost: enqueues a sacrifice-style luck boost with no petal burned
- *  and no worth deducted. */
+ *  and no worth deducted. Luck-only (floor_tier = -1), unlike real sacrifices. */
 export function enqueueDevBoost(userId: string, mult: number, spins: number, nowMs: number): void {
-  insertSacrificeStmt.run(userId, '(dev boost)', 0, 0, mult, spins, spins, nowMs);
+  insertSacrificeStmt.run(userId, '(dev boost)', 0, 0, mult, spins, spins, nowMs, -1, 0);
 }
 
 /** Removes every active and queued sacrifice boost. Returns how many. */
@@ -294,13 +317,15 @@ export function clearSacrificeQueue(): number {
 }
 
 /** Burns one petal from the user's stack, deducts its value from their total
- *  (negative values heal), and enqueues the boost. False if the stack is gone. */
+ *  (negative values heal), and enqueues a floor-based boost. False if the
+ *  stack is gone. */
 export function performSacrifice(p: {
   userId: string;
   petal: string;
   tier: number;
   value: number;
-  mult: number;
+  floorTier: number;
+  floorUpgrade: number;
   spins: number;
   nowMs: number;
 }): boolean {
@@ -314,7 +339,8 @@ export function performSacrifice(p: {
     decStackStmt.run(p.userId, p.petal, p.tier);
     deleteEmptyStackStmt.run(p.userId, p.petal, p.tier);
     adjustTotalStmt.run(p.value, p.userId);
-    insertSacrificeStmt.run(p.userId, p.petal, p.tier, p.value, p.mult, p.spins, p.spins, p.nowMs);
+    // mult = 1: a real sacrifice grants no luck, only the tier floor.
+    insertSacrificeStmt.run(p.userId, p.petal, p.tier, p.value, 1, p.spins, p.spins, p.nowMs, p.floorTier, p.floorUpgrade);
     db.exec('COMMIT');
     return true;
   } catch (err) {

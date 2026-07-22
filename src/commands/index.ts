@@ -10,6 +10,7 @@ import * as spintop from './spintop.js';
 import * as spinodds from './spinodds.js';
 import * as spinconfig from './spinconfig.js';
 import * as testspin from './testspin.js';
+import * as simulatespin from './simulatespin.js';
 import * as inventory from './inventory.js';
 import * as sacrifice from './sacrifice.js';
 import * as devsacrifice from './devsacrifice.js';
@@ -22,6 +23,6 @@ export interface Command {
 
 export const commands: Command[] = [
   script, version, changelog, help, setup,
-  spin, collection, spintop, spinodds, spinconfig, testspin, inventory, sacrifice, devsacrifice, economymanagement,
+  spin, collection, spintop, spinodds, spinconfig, testspin, simulatespin, inventory, sacrifice, devsacrifice, economymanagement,
 ];
 export const commandMap = new Map<string, Command>(commands.map((c) => [c.data.name, c]));

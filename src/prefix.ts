@@ -224,6 +224,20 @@ const parsers: Record<string, Parser> = {
     return { ...splitRarityThenPetal(tokens), public: true };
   },
 
+  async simulatespin(tokens, _message, prefix) {
+    const usage = new UsageError(
+      `Usage: \`${prefix}simulatespin <count> <luck> [none|curve flatten multi]\` — e.g. \`${prefix}simulatespin 10000 5 none\``,
+    );
+    if (tokens.length < 2) throw usage;
+    const count = Number(tokens[0]);
+    const luck = Number(tokens[1]);
+    if (!Number.isInteger(count) || count < 1) throw usage;
+    if (!Number.isFinite(luck) || luck < 1) throw usage;
+    const rest = tokens.slice(2).join(' ').toLowerCase().trim();
+    if (rest && !/^(none|curve\s*flatten\s*multi|flatten|flat)$/.test(rest)) throw usage;
+    return { count, luck, modifier: /flat/.test(rest) ? 'flatten' : 'none' };
+  },
+
   async devsacrifice(tokens, _message, prefix) {
     const usage = new UsageError(`Usage: \`${prefix}devsacrifice <multiplier> <duration> [clear] [silent]\``);
     if (tokens.length < 2) throw usage;

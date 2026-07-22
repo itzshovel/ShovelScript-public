@@ -20,8 +20,14 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const tierLines = odds.map((p, i) => `**${rarities[i].name}** — ${fmtChance(p)}`);
 
   const queue = db.getSacrificeQueue();
-  const sacNote = queue.length
-    ? ` • 🩸 Sacrifice x${fmtMult(queue[0].mult)} active (${queue[0].spinsLeft} spins left${queue.length > 1 ? `, ${queue.length - 1} queued` : ''})`
+  const active = queue[0];
+  const activeNote = active
+    ? active.floorTier >= 0
+      ? `🩸 Sacrifice floor ${rarities[active.floorTier].name}+ active`
+      : `🩸 Boost x${fmtMult(active.mult)} active`
+    : '';
+  const sacNote = active
+    ? ` • ${activeNote} (${active.spinsLeft} spins left${queue.length > 1 ? `, ${queue.length - 1} queued` : ''})`
     : '';
   const tiersEmbed = new EmbedBuilder()
     .setColor(0x9b59b6)
