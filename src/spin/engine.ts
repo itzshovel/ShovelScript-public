@@ -186,7 +186,13 @@ export interface EffectOutcome {
 /** Side effects granted by effect petals (clover, token, plastic egg, radiance,
  *  shade, royal serum). */
 export function resolveEffect(petal: SpinPetal, now: number, rng: Rng): EffectOutcome {
-  switch (petal.effect) {
+  return effectByKind(petal.effect ?? '', now, rng);
+}
+
+/** The same effect outcomes keyed directly by kind, so admin tools can grant an
+ *  effect without a petal. Unknown kinds are a no-op. */
+export function effectByKind(kind: string, now: number, rng: Rng): EffectOutcome {
+  switch (kind) {
     case 'clover':
       return {
         stunnedUntilMs: 0,
@@ -241,6 +247,40 @@ export function serumActive(effects: EffectRow[], now: number): boolean {
 
 /** Fraction of a sacrifice's value redistributed back through boosted spins. */
 export const SACRIFICE_REDIST = 0.8;
+
+/** Luck multiplier a sacrifice grants, per solved floor tier. Bigger sacrifices
+ *  reach a higher floor and so get a bigger multiplier (small sacrifices ~x2,
+ *  the deepest ~x100). The multiplier is folded into the spin's luck, but the
+ *  floor is still applied as a minimum — so it only ever changes a spin whose
+ *  boosted roll clears the floor. Tune this to trade base reliability against
+ *  jackpot upside. */
+export const SACRIFICE_MULT_PER_TIER = 1.7;
+
+/** Multiplier "cost" to lift the floor from tier `t` to `t+1`. The floor climbs
+ *  quickly through low rarities but far slower through high ones, so a big
+ *  multiplier can't run the guaranteed floor away at the top of the ladder. */
+function floorStepCost(tier: number): number {
+  if (tier >= 50) return 450;
+  if (tier >= 35) return 150;
+  if (tier >= 20) return 85;
+  return 50;
+}
+
+/** Tiers a multiplier lifts the floor above `baseTier`, spending it through the
+ *  per-tier costs (each tier crossed divides the remaining budget). */
+function floorBump(baseTier: number, mult: number): number {
+  let budget = mult;
+  let tier = baseTier;
+  let bump = 0;
+  while (tier < rarities.length - 1) {
+    const cost = floorStepCost(tier);
+    if (budget < cost) break;
+    budget /= cost;
+    tier++;
+    bump++;
+  }
+  return bump;
+}
 
 /** Signed mean multiplier of a pool pull (negatives and fractionals included).
  *  Boost floors are chosen against this so a floored spin's realized value
@@ -298,15 +338,23 @@ export function sacrificeFloor(targetPerSpin: number): SacrificeFloor {
   return { floorTier: f, floorUpgrade };
 }
 
-/** Boost bought by sacrificing |value|: duration scales with log10 of the
- *  value, and boosted spins are FLOORED to a rarity that redistributes
- *  SACRIFICE_REDIST of the value back reliably — per spin, not merely in
- *  expectation. (The old luck-multiplier model's mean was carried by rare high
- *  rolls, so a typical boost window paid back almost nothing.) */
-export function sacrificeBoost(absValue: number): SacrificeFloor & { spins: number } {
+/** Boost bought by sacrificing |value|. Two mechanics combine:
+ *  - a FLOOR that redistributes SACRIFICE_REDIST of the value back reliably per
+ *    spin (a typical window pays back ~80%, not the near-zero the old pure
+ *    luck-multiplier model gave), and
+ *  - a luck MULTIPLIER scaling with the sacrifice size, folded into each boosted
+ *    spin's roll. Because the floor is applied as a minimum on top, the
+ *    multiplier only changes a spin whose boosted roll would already clear the
+ *    floor — the reliable base stays intact and the multiplier is upside.
+ *  The multiplier also nudges the floor up (floorBump), but that climb slows
+ *  sharply at high rarities so it can't run away at the top of the ladder. */
+export function sacrificeBoost(absValue: number): SacrificeFloor & { spins: number; mult: number } {
   const spins = Math.min(25, Math.max(3, 3 + 2 * Math.floor(Math.log10(1 + absValue))));
   const targetPerSpin = (SACRIFICE_REDIST * absValue) / spins;
-  return { ...sacrificeFloor(targetPerSpin), spins };
+  const base = sacrificeFloor(targetPerSpin);
+  const mult = 1 + SACRIFICE_MULT_PER_TIER * base.floorTier;
+  const floorTier = Math.min(rarities.length - 1, base.floorTier + floorBump(base.floorTier, mult));
+  return { floorTier, floorUpgrade: base.floorUpgrade, spins, mult };
 }
 
 /** Concrete floor tier for one boosted spin, sampling the fractional upgrade. */

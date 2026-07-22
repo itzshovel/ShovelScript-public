@@ -185,13 +185,15 @@ function poolPick(): (typeof poolPetals)[number] {
   }
   return poolPetals[poolPetals.length - 1];
 }
-function realizedPayback(value: number, trials = 4000): { mean: number; median: number; p10: number; floorTier: number; spins: number } {
+function realizedPayback(value: number, trials = 4000): { mean: number; median: number; p10: number; floorTier: number; mult: number; spins: number } {
   const boost = engine.sacrificeBoost(value);
   const fracs: number[] = [];
   for (let t = 0; t < trials; t++) {
     let sum = 0;
     for (let s = 0; s < boost.spins; s++) {
-      const tier = Math.max(engine.rollTier(1, {}, rng), engine.rollFloorTier(boost, rng));
+      // Exactly what /spin does: roll with the sacrifice's multiplier folded
+      // into luck, then take the max against the floor.
+      const tier = Math.max(engine.rollTier(boost.mult, {}, rng), engine.rollFloorTier(boost, rng));
       sum += engine.computeValue(poolPick(), tier, rarities.length - 1, false);
     }
     fracs.push(sum / value);
@@ -202,13 +204,15 @@ function realizedPayback(value: number, trials = 4000): { mean: number; median: 
     median: fracs[trials >> 1],
     p10: fracs[Math.floor(trials * 0.1)],
     floorTier: boost.floorTier,
+    mult: boost.mult,
     spins: boost.spins,
   };
 }
 
-// Across the whole meaningful range, the median boost window pays back near
-// 0.8x and even an unlucky (10th-percentile) window returns a solid chunk —
-// never the ~0.01x-0.06x the old luck-multiplier model delivered.
+// Across the whole meaningful range, the floor keeps the median window paying
+// back at least its reliable ~80% base, and the value-scaled multiplier only
+// adds upside on top — never the ~0.01x-0.06x the old pure luck model gave, and
+// even an unlucky (10th-percentile) window returns a solid chunk.
 for (const [label, value] of [
   ['tier 15 normal', rarityValue(15)],
   ['tier 20 normal (~99k)', rarityValue(20)],
@@ -219,9 +223,9 @@ for (const [label, value] of [
 ] as Array<[string, number]>) {
   const r = realizedPayback(value);
   check(
-    `${label}: median payback near ${engine.SACRIFICE_REDIST}x`,
-    Math.abs(r.median - engine.SACRIFICE_REDIST) < 0.2 && r.p10 > 0.3,
-    `floor ${rarities[r.floorTier].name} • median ${r.median.toFixed(2)}x • p10 ${r.p10.toFixed(2)}x • mean ${r.mean.toFixed(2)}x`,
+    `${label}: median payback >= reliable base, p10 solid`,
+    r.median >= 0.6 && r.p10 > 0.3,
+    `floor ${rarities[r.floorTier].name} • x${r.mult.toFixed(1)} • median ${r.median.toFixed(2)}x • p10 ${r.p10.toFixed(2)}x • mean ${r.mean.toFixed(2)}x`,
   );
 }
 
@@ -236,7 +240,7 @@ check('negative petals boost like positives (|value|)', negSame.floorTier === po
 
 const ex = (v: number) => {
   const b = engine.sacrificeBoost(v);
-  return `${rarities[b.floorTier].name}+/${b.spins}sp`;
+  return `${rarities[b.floorTier].name}+/x${b.mult.toFixed(1)}/${b.spins}sp`;
 };
 console.log(
   '  info: value curve — ' +

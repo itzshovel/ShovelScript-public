@@ -237,24 +237,6 @@ const parsers: Record<string, Parser> = {
     if (rest && !/^(none|curve\s*flatten\s*multi|flatten|flat)$/.test(rest)) throw usage;
     return { count, luck, modifier: /flat/.test(rest) ? 'flatten' : 'none' };
   },
-
-  async devsacrifice(tokens, _message, prefix) {
-    const usage = new UsageError(`Usage: \`${prefix}devsacrifice <multiplier> <duration> [clear] [silent]\``);
-    if (tokens.length < 2) throw usage;
-    const multiplier = Number(tokens[0]);
-    const duration = Number(tokens[1]);
-    // mirror the slash command's option constraints (min 1, integer spins)
-    if (!Number.isFinite(multiplier) || multiplier < 1) throw usage;
-    if (!Number.isInteger(duration) || duration < 1) throw usage;
-    const values: Record<string, unknown> = { multiplier, duration };
-    for (const flag of tokens.slice(2)) {
-      const f = flag.toLowerCase();
-      if (f === 'clear') values.clear = true;
-      else if (f === 'silent') values.silent = true;
-      else throw usage;
-    }
-    return values;
-  },
 };
 
 // --- dispatcher -------------------------------------------------------------
@@ -271,9 +253,9 @@ export async function handlePrefixMessage(message: Message): Promise<void> {
   const tokens = body.split(/\s+/);
   const name = tokens.shift()!.toLowerCase();
 
-  if (name === 'economymanagement') {
+  if (name === 'economymanagement' || name === 'boostmanagement') {
     await message.reply({
-      content: '🔒 /economymanagement only works as a slash command.',
+      content: `🔒 /${name} only works as a slash command.`,
       allowedMentions: { parse: [], repliedUser: false },
     });
     return;

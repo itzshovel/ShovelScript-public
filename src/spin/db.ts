@@ -117,6 +117,12 @@ const insertEffectStmt = db.prepare(
   'INSERT INTO spin_effects (user_id, kind, mult, starts_ms, expires_ms) VALUES (?, ?, ?, ?, ?)',
 );
 const pruneEffectsStmt = db.prepare('DELETE FROM spin_effects WHERE expires_ms > 0 AND expires_ms < ?');
+const clearEffectsStmt = db.prepare('DELETE FROM spin_effects WHERE user_id = ?');
+const liftStunStmt = db.prepare('UPDATE spin_users SET stunned_until_ms = 0 WHERE user_id = ?');
+const setStunStmt = db.prepare(`
+  INSERT INTO spin_users (user_id, stunned_until_ms) VALUES (?, ?)
+  ON CONFLICT(user_id) DO UPDATE SET stunned_until_ms = excluded.stunned_until_ms
+`);
 const collectionStmt = db.prepare(
   'SELECT petal, tier, count FROM spin_collection WHERE user_id = ? ORDER BY tier DESC, count DESC, petal ASC',
 );
@@ -185,6 +191,40 @@ export function getEffects(userId: string): EffectRow[] {
   }));
 }
 
+/** Grants an effect outcome (from engine.effectByKind) to a user, exactly as a
+ *  matching petal pull would — inserting its effect rows and applying any stun.
+ *  Used by admin tools. */
+export function grantEffect(
+  userId: string,
+  outcome: {
+    stunnedUntilMs: number;
+    newEffects: Array<{ kind: string; mult: number; startsMs: number; expiresMs: number }>;
+  },
+): void {
+  db.exec('BEGIN');
+  try {
+    for (const e of outcome.newEffects) insertEffectStmt.run(userId, e.kind, e.mult, e.startsMs, e.expiresMs);
+    if (outcome.stunnedUntilMs > 0) setStunStmt.run(userId, outcome.stunnedUntilMs);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+/** Removes all of a user's active effects and lifts any Plastic Egg stun.
+ *  Returns how many effect rows were cleared. */
+export function clearEffects(userId: string): number {
+  const n = Number(clearEffectsStmt.run(userId).changes);
+  liftStunStmt.run(userId);
+  return n;
+}
+
+/** Whether a Plastic Egg stun is currently keeping this user from spinning. */
+export function isStunned(userId: string, nowMs: number): boolean {
+  return getUser(userId).stunnedUntilMs > nowMs;
+}
+
 export interface SpinRecord {
   userId: string;
   petal: string;
@@ -223,7 +263,8 @@ export interface SacrificeRow {
   petal: string;
   tier: number;
   value: number;
-  /** Luck multiplier for dev boosts; 1 for real (floor-based) sacrifices. */
+  /** Luck multiplier folded into each boosted spin's roll. Real sacrifices scale
+   *  it with their value; dev boosts set it directly. 1 means no luck boost. */
   mult: number;
   spinsTotal: number;
   spinsLeft: number;
@@ -313,10 +354,23 @@ export function recalculateEconomy(
   }
 }
 
-/** Dev/admin boost: enqueues a sacrifice-style luck boost with no petal burned
- *  and no worth deducted. Luck-only (floor_tier = -1), unlike real sacrifices. */
+/** Admin boost: enqueues a sacrifice-style boost with no petal burned and no
+ *  worth deducted. A luck-only boost leaves floorTier at -1; a floor boost
+ *  carries both a floor and its multiplier, like a real sacrifice. */
+export function enqueueBoost(p: {
+  userId: string;
+  mult: number;
+  spins: number;
+  floorTier: number;
+  floorUpgrade: number;
+  nowMs: number;
+}): void {
+  insertSacrificeStmt.run(p.userId, '(admin boost)', 0, 0, p.mult, p.spins, p.spins, p.nowMs, p.floorTier, p.floorUpgrade);
+}
+
+/** Luck-only admin boost (floor_tier = -1). Thin wrapper over enqueueBoost. */
 export function enqueueDevBoost(userId: string, mult: number, spins: number, nowMs: number): void {
-  insertSacrificeStmt.run(userId, '(dev boost)', 0, 0, mult, spins, spins, nowMs, -1, 0);
+  enqueueBoost({ userId, mult, spins, floorTier: -1, floorUpgrade: 0, nowMs });
 }
 
 /** Removes every active and queued sacrifice boost. Returns how many. */
@@ -325,8 +379,8 @@ export function clearSacrificeQueue(): number {
 }
 
 /** Burns one petal from the user's stack, deducts its value from their total
- *  (negative values heal), and enqueues a floor-based boost. False if the
- *  stack is gone. */
+ *  (negative values heal), and enqueues a floor-plus-multiplier boost. False if
+ *  the stack is gone. */
 export function performSacrifice(p: {
   userId: string;
   petal: string;
@@ -334,6 +388,7 @@ export function performSacrifice(p: {
   value: number;
   floorTier: number;
   floorUpgrade: number;
+  mult: number;
   spins: number;
   nowMs: number;
 }): boolean {
@@ -347,8 +402,8 @@ export function performSacrifice(p: {
     decStackStmt.run(p.userId, p.petal, p.tier);
     deleteEmptyStackStmt.run(p.userId, p.petal, p.tier);
     adjustTotalStmt.run(p.value, p.userId);
-    // mult = 1: a real sacrifice grants no luck, only the tier floor.
-    insertSacrificeStmt.run(p.userId, p.petal, p.tier, p.value, 1, p.spins, p.spins, p.nowMs, p.floorTier, p.floorUpgrade);
+    // A real sacrifice carries both a floor and a value-scaled luck multiplier.
+    insertSacrificeStmt.run(p.userId, p.petal, p.tier, p.value, p.mult, p.spins, p.spins, p.nowMs, p.floorTier, p.floorUpgrade);
     db.exec('COMMIT');
     return true;
   } catch (err) {

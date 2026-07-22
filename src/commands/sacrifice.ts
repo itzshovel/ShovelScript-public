@@ -1,7 +1,9 @@
-// /sacrifice — burn a petal from your collection for a server-wide luck boost.
-// The multiplier is solved so the boosted spins redistribute ~80% of the
-// sacrificed value back on average; duration scales with the value. Boosts
-// queue: one is active at a time, consumed by anyone's spins.
+// /sacrifice — burn a petal from your collection for a server-wide boost. Each
+// boosted spin is floored to a guaranteed minimum rarity that redistributes
+// ~80% of the sacrificed value back reliably, and also carries a value-scaled
+// luck multiplier that lifts spins which would already beat the floor even
+// higher. Duration scales with the value. Boosts queue: one is active at a
+// time, consumed by anyone's spins.
 
 import {
   ActionRowBuilder,
@@ -25,7 +27,7 @@ import {
 } from '../spin/data.js';
 import * as db from '../spin/db.js';
 import * as engine from '../spin/engine.js';
-import { fmtValue } from '../spin/format.js';
+import { fmtMult, fmtValue } from '../spin/format.js';
 
 export const data = new SlashCommandBuilder()
   .setName('sacrifice')
@@ -81,7 +83,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   const user = db.getUser(userId);
   const value = engine.computeValue(petal, tier, Math.max(user.highestTier, tier), false);
-  const { floorTier, floorUpgrade, spins } = engine.sacrificeBoost(Math.abs(value));
+  const { floorTier, floorUpgrade, spins, mult } = engine.sacrificeBoost(Math.abs(value));
   const name = displayName(petal, tier);
   const queueAhead = db.getSacrificeQueue().length;
 
@@ -90,6 +92,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       ? `Your total worth **drops by ${fmtValue(value)}**.`
       : `The curse is purged: your total worth **rises by ${fmtValue(-value)}**.`;
   const queueNote = queueAhead > 0 ? `\nIt queues behind ${queueAhead} active/pending boost${queueAhead > 1 ? 's' : ''}.` : '';
+  const boostNote = mult > 1 ? ` Lucky spins get a **x${fmtMult(mult)} luck** push to reach even higher.` : '';
 
   const preview = new EmbedBuilder()
     .setColor(rarityColor(tier))
@@ -97,7 +100,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     .setDescription(
       `Worth ${fmtValue(value)} (you own ×${owned}). ${worthNote}\n` +
         `For the next **${spins} spins server-wide**, every spin is guaranteed to land at ` +
-        `least **${rarities[floorTier].name}** rarity (anyone's spins, often higher).${queueNote}\n\n` +
+        `least **${rarities[floorTier].name}** rarity (anyone's spins, often higher).${boostNote}${queueNote}\n\n` +
         `This cannot be undone.`,
     );
 
@@ -138,6 +141,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         value,
         floorTier,
         floorUpgrade,
+        mult,
         spins,
         nowMs: Date.now(),
       });
@@ -155,7 +159,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         .setTitle(`🩸 ${interaction.user.username} sacrificed a ${rarities[tier].name} ${name}!`)
         .setDescription(
           `Worth ${fmtValue(value)} — the server's next **${spins} spins** are floored to ` +
-            `**${rarities[floorTier].name}+** rarity.\n` +
+            `**${rarities[floorTier].name}+** rarity${mult > 1 ? ` with a **x${fmtMult(mult)} luck** boost on top` : ''}.\n` +
             (isActive ? 'The floor is **live now** — go spin!' : `Queued: it activates after the current boost${nowQueued.length > 2 ? 'es' : ''} run out.`),
         )
         .setThumbnail('attachment://petal.png')

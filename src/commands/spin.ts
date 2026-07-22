@@ -66,11 +66,20 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const rng = Math.random;
   const effects = db.getEffects(userId);
   const boost = db.getSacrificeQueue()[0];
-  // Dev boosts add luck; real (floor-based) sacrifices instead guarantee a
-  // minimum tier — so their redistribution is actually delivered per spin.
+  // Both dev boosts and real sacrifices fold their multiplier into this spin's
+  // luck; real sacrifices also carry a floor (below), so their multiplier only
+  // changes spins whose boosted roll already clears that floor.
   const globalBoosts =
     boost && boost.mult > 1
-      ? [{ label: `Boost x${fmtMult(boost.mult)} (${boost.spinsLeft} left)`, mult: boost.mult }]
+      ? [
+          {
+            label:
+              boost.floorTier >= 0
+                ? `Sacrifice x${fmtMult(boost.mult)}`
+                : `Boost x${fmtMult(boost.mult)} (${boost.spinsLeft} left)`,
+            mult: boost.mult,
+          },
+        ]
       : [];
   const { luck, consumedIds, parts } = engine.computeLuck(effects, now, globalBoosts);
   let tier = engine.rollTier(luck, db.getWeightOverrides(), rng);

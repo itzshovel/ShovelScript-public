@@ -23,7 +23,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const active = queue[0];
   const activeNote = active
     ? active.floorTier >= 0
-      ? `🩸 Sacrifice floor ${rarities[active.floorTier].name}+ active`
+      ? `🩸 Sacrifice floor ${rarities[active.floorTier].name}+${active.mult > 1 ? ` (x${fmtMult(active.mult)} luck)` : ''} active`
       : `🩸 Boost x${fmtMult(active.mult)} active`
     : '';
   const sacNote = active
